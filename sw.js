@@ -1,5 +1,5 @@
 // Foulée — service worker: works offline, picks up new versions when online.
-const VERSION = 'foulee-v1';
+const VERSION = 'foulee-v2';
 const FONTS = 'foulee-fonts';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
