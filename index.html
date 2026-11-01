@@ -402,6 +402,41 @@ const FOULEE = (() => {
     return { workouts: out, weeks, firstMon };
   }
 
+  // ---------- maintenance (no race) rolling plan ----------
+  const BLOCK_F = [0.85, 0.92, 1.0, 0.75];
+  const TEST_NOTE = "Test de VMA (demi-Cooper) : après l'échauffement, cours 6 minutes le plus vite possible à allure régulière. Ta VMA en km/h = distance parcourue en mètres ÷ 100 (ex. 1 450 m → 14,5 km/h). Mets-la ensuite à jour dans Plan › Modifier.";
+  function genFree(p, today, firstMon, fromWeek, nWeeks) {
+    const days = [...(p.days || [])].map(Number).sort((a, b) => a - b);
+    if (!days.length) return { error: "Choisis au moins un jour d'entraînement." };
+    const roles = ROLES[days.length];
+    const start = addDays(today, 1);
+    const out = [];
+    const mk = (date, type, steps, notes) => ({ id: uid('w'), date, type, steps, auto: true, ...(notes ? { notes } : {}) });
+    for (let i = fromWeek; i < fromWeek + nWeeks; i++) {
+      const mon = addDays(firstMon, i * 7);
+      const pos = i % 4, block = Math.floor(i / 4);
+      const f = BLOCK_F[pos] * Math.min(1.15, 1 + 0.03 * block);
+      const test = i % 8 === 7;
+      const scale = n => n <= 1 ? 1 : Math.max(2, Math.round(n * Math.min(1, f)));
+      let tested = false;
+      days.forEach((wd, j) => {
+        const d = addDays(mon, wd);
+        if (d < start) return;
+        const r = roles[j];
+        if (r === 'sl') out.push(mk(d, 'sl', cont(round5(65 * f))));
+        else if (r === 'ef') out.push(mk(d, 'ef', cont(round5(45 * f))));
+        else if (r === 'recup') out.push(mk(d, 'recup', cont(30, 'recup')));
+        else if (test && !tested) { tested = true; out.push(mk(d, 'test', frac({ wu: 20, n: 1, by: 'time', v: 360, z: 'vma', rec: 0, cd: 10 }), TEST_NOTE)); }
+        else {
+          const useQ2 = r === 'q2' || (!roles.includes('q2') && i % 2 === 1);
+          if (useQ2) { const q = Q2_POOL[i % Q2_POOL.length]; out.push(mk(d, 'frac', frac({ ...q, n: scale(q.n) }))); }
+          else { const q = VMA_POOL[i % VMA_POOL.length]; out.push(mk(d, 'frac', frac({ ...q, z: 'vma', n: scale(q.n) }))); }
+        }
+      });
+    }
+    return { workouts: out };
+  }
+
   // ---------- Garmin FIT workout encoder ----------
   const ascii = (s, n) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/×/g, 'x').replace(/[^\x20-\x7E]/g, '').slice(0, n - 1);
   class Bytes {
@@ -500,7 +535,7 @@ const FOULEE = (() => {
     return new Uint8Array(w.a);
   }
 
-  return { pad, iso, parseD, addDays, mondayOf, daysBetween, GOALS, zoneLabel, paceRange, paceMid, stepTD, wTD, fmtPace, fmtDur, fmtDurRound, fmtKm, fmtDist, fmtVal, notation, mainZone, S_, cont, frac, genPlan, uid, ascii, encodeFit, zip };
+  return { pad, iso, parseD, addDays, mondayOf, daysBetween, GOALS, zoneLabel, paceRange, paceMid, stepTD, wTD, fmtPace, fmtDur, fmtDurRound, fmtKm, fmtDist, fmtVal, notation, mainZone, S_, cont, frac, genPlan, genFree, uid, ascii, encodeFit, zip };
 })();
 if (typeof module !== 'undefined') module.exports = FOULEE;
 </script>
@@ -514,7 +549,8 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const safeUrl = u => /^https?:\/\//i.test(String(u || '').trim()) ? String(u).trim() : '';
-const ctx = () => ({ vma: Number(S.profile?.vma) || 14, goal: S.profile?.goal || '10k' });
+const isFree = () => S.profile?.mode === 'free';
+const ctx = () => ({ vma: Number(S.profile?.vma) || 14, goal: isFree() ? '10k' : (S.profile?.goal || '10k') });
 const workouts = () => (S.plan?.workouts || []).slice().sort((a, b) => a.date.localeCompare(b.date));
 const runFor = w => S.runs.find(r => r.wid === w.id);
 const isDone = w => !!runFor(w);
@@ -525,6 +561,7 @@ const TYPES = {
   sl: { label: 'Sortie longue', short: 'Sortie longue' },
   recup: { label: 'Footing récupération', short: 'Récup' },
   frac: { label: 'Fractionné', short: 'Qualité' },
+  test: { label: 'Test de VMA', short: 'Test VMA' },
   course: { label: 'Course objectif', short: 'Jour J' },
 };
 const ZH = { recup: 28, ef: 44, as: 70, seuil: 80, vma: 100 };
@@ -609,7 +646,7 @@ function render() {
   if (S.profile?.raceDate && S.profile.raceDate >= TODAY) {
     const j = F.daysBetween(TODAY, S.profile.raceDate);
     cd.innerHTML = `<strong>J-${j}</strong> · ${esc(F.GOALS[S.profile.goal]?.label || '')}`;
-  } else cd.textContent = '';
+  } else cd.innerHTML = isFree() ? '<strong>Entretien</strong>' : '';
   const v = $('#view');
   if (!S.ready) { v.innerHTML = `<div class="col"><div class="empty"><p class="muted">Chargement de ton carnet…</p></div></div>`; return; }
   const stale = S.runs.length >= 3 && (!S.lastBackup || F.daysBetween(S.lastBackup, TODAY) > 30);
@@ -638,20 +675,31 @@ function viewPlan() {
     const save = S.profile ? '' : '';
     return `<section class="empty">
         <p class="eyebrow">Ton plan</p>
-        <h2>Fixe un objectif, Foulée prépare les séances</h2>
-        <p class="muted">Choisis ta course, ta VMA et tes jours dispo. Tu obtiens un plan semaine par semaine, chaque séance exportable vers ta Venu 2S.</p>
-        <div class="row"><button class="btn primary" data-act="setup">Créer mon plan</button><button class="btn" data-act="add-w">Ajouter une séance seule</button></div>
+        <h2>Prépare une course ou progresse à ton rythme</h2>
+        <p class="muted">Indique ta VMA et tes jours dispo. Avec une course en vue, Foulée construit un plan jusqu’au jour J. Sans objectif, le mode entretien enchaîne des cycles de 4 semaines qui se renouvellent seuls. Chaque séance s’exporte vers ta Venu 2S.</p>
+        <div class="row"><button class="btn primary" data-act="race">Préparer une course</button><button class="btn" data-act="free">Mode entretien</button></div>
+        <button class="btn ghost" data-act="add-w" style="align-self:flex-start;padding-left:0">Ajouter une séance seule</button>
       </section>
       ${exWeek.length ? `<section class="week"><div class="week-h"><h3>Exemple <span>· semaine type pour un 10 km</span></h3></div>${exWeek.map(w => sessRow(w, { example: true })).join('')}</section>` : ''}${save}`;
   }
   const p = S.profile, g = F.GOALS[p.goal];
   const j = p.raceDate >= TODAY ? F.daysBetween(TODAY, p.raceDate) : null;
   const next = ws.find(w => w.date >= TODAY && !isDone(w));
-  let html = `<section class="card goal">
+  let html;
+  if (isFree()) {
+    const wi = S.plan?.firstMon ? Math.max(0, Math.floor(F.daysBetween(S.plan.firstMon, F.mondayOf(TODAY)) / 7)) : 0;
+    const nextTest = ws.find(w => w.type === 'test' && w.date >= TODAY && !isDone(w));
+    html = `<section class="card goal">
+      <div><p class="eyebrow">Mode</p><div class="big">Entretien</div></div>
+      <div class="j num" style="font-size:22px;line-height:1.1">Cycle ${Math.floor(wi / 4) + 1}<br><span class="muted" style="font-size:16px">sem. ${wi % 4 + 1}/4${wi % 4 === 3 ? ' · légère' : ''}</span></div>
+      <div class="sub"><span class="num">VMA ${F.fmtKm(Number(p.vma))} km/h</span><span class="num">EF ${F.fmtPace(F.paceRange('ef', ctx())[0])}–${F.fmtPace(F.paceRange('ef', ctx())[1])}/km</span>${nextTest ? `<span>Prochain test VMA : ${esc(fmtDay(nextTest.date, { day: 'numeric', month: 'short' }))}</span>` : ''}</div>
+      <div class="sub" style="gap:4px 14px"><button class="btn ghost" data-act="free" style="padding-left:0">Modifier</button><button class="btn ghost" data-act="race" style="padding-left:0">Me fixer un objectif de course</button></div>
+    </section>`;
+  } else html = `<section class="card goal">
       <div><p class="eyebrow">Objectif</p><div class="big">${esc(g?.label || '')}</div></div>
       <div class="j num">${j !== null ? `J-${j}` : 'Terminé'}</div>
       <div class="sub"><span>${esc(fmtDay(p.raceDate, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))}</span><span class="num">VMA ${F.fmtKm(Number(p.vma))} km/h</span><span class="num">${esc(F.zoneLabel('as', p.goal))} ${F.fmtPace(F.paceMid('as', ctx()))}/km</span></div>
-      <div class="sub"><button class="btn ghost" data-act="setup" style="padding-left:0">Modifier l’objectif</button></div>
+      <div class="sub" style="gap:4px 14px"><button class="btn ghost" data-act="race" style="padding-left:0">Modifier l’objectif</button><button class="btn ghost" data-act="free" style="padding-left:0">${j === null ? 'Passer en mode entretien' : 'Arrêter et passer en entretien'}</button></div>
     </section>`;
   if (next) {
     const e = est(next);
@@ -798,7 +846,7 @@ function bindView(v) {
     const mon = b.dataset.exportWeek, sun = F.addDays(mon, 6);
     exportGarmin(workouts().filter(w => w.date >= mon && w.date <= sun && w.date >= TODAY && !isDone(w)), `semaine-${mon}`);
   });
-  $$('[data-act]', v).forEach(b => b.onclick = () => ({ setup: sheetSetup, 'add-w': () => sheetEdit(null), 'add-run': () => sheetRun(null), 'add-route': () => sheetRoute(null), backup: sheetSettings })[b.dataset.act]());
+  $$('[data-act]', v).forEach(b => b.onclick = () => ({ setup: () => sheetSetup(), race: () => sheetSetup('race'), free: () => sheetSetup('free'), 'add-w': () => sheetEdit(null), 'add-run': () => sheetRun(null), 'add-route': () => sheetRoute(null), backup: sheetSettings })[b.dataset.act]());
 }
 $$('.tab').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; render(); window.scrollTo(0, 0); });
 
@@ -806,12 +854,19 @@ $$('.tab').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; render(); win
 function defaultRace() { let d = F.addDays(TODAY, 70); while (F.parseD(d).getDay() !== 0) d = F.addDays(d, 1); return d; }
 const DAYLBL = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 const DAYNAME = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
-function sheetSetup() {
-  const p = S.profile || { goal: '10k', raceDate: defaultRace(), vma: 14, days: [1, 3, 6] };
+function sheetSetup(preset) {
+  const cur = S.profile || {};
+  const p = { goal: cur.goal || '10k', raceDate: cur.raceDate && cur.raceDate > TODAY ? cur.raceDate : defaultRace(), vma: cur.vma || 14, days: cur.days || [1, 3, 6] };
+  const mode = preset || cur.mode || 'race';
   const body = `<form id="setup">
-    <div class="grid2">
+    <div class="days" style="grid-template-columns:1fr 1fr" role="radiogroup" aria-label="Mode">
+      <label><input type="radio" name="su-mode" value="race" ${mode === 'race' ? 'checked' : ''}><span style="font-size:16px">Préparer une course</span></label>
+      <label><input type="radio" name="su-mode" value="free" ${mode === 'free' ? 'checked' : ''}><span style="font-size:16px">Entretien</span></label>
+    </div>
+    <p class="small muted" id="su-modehelp"></p>
+    <div class="grid2" id="su-race">
       <label class="field"><span>Objectif</span><select id="su-goal">${Object.entries(F.GOALS).map(([k, g]) => `<option value="${k}" ${k === p.goal ? 'selected' : ''}>${g.label}</option>`).join('')}</select></label>
-      <label class="field"><span>Date de la course</span><input id="su-date" type="date" value="${esc(p.raceDate)}" min="${F.addDays(TODAY, 2)}" required></label>
+      <label class="field"><span>Date de la course</span><input id="su-date" type="date" value="${esc(p.raceDate)}" min="${F.addDays(TODAY, 2)}"></label>
     </div>
     <label class="field"><span>VMA (km/h)</span><input id="su-vma" type="number" inputmode="decimal" step="0.1" min="8" max="25" value="${esc(p.vma)}" required></label>
     <details><summary class="small" style="cursor:pointer;color:var(--accent);font-weight:600">Je ne connais pas ma VMA</summary>
@@ -824,26 +879,36 @@ function sheetSetup() {
     <div class="preview" id="su-prev"></div>
     <p class="err" id="su-err" hidden></p>
     ${S.plan?.workouts?.length ? `<p class="small muted">Les séances futures générées automatiquement seront remplacées. Tes séances ajoutées à la main et celles déjà faites sont conservées.</p>` : ''}
-    <button class="btn primary block" type="submit">Enregistrer ce plan</button>
+    <button class="btn primary block" type="submit" id="su-submit">Enregistrer</button>
   </form>`;
-  openSheet(S.profile ? 'Modifier l’objectif' : 'Créer mon plan', body, el => {
-    const read = () => ({ goal: $('#su-goal', el).value, raceDate: $('#su-date', el).value, vma: num($('#su-vma', el).value), days: $$('.days input:checked', el).map(i => Number(i.value)) });
+  openSheet(S.profile ? 'Mon programme' : 'Créer mon plan', body, el => {
+    const getMode = () => $('input[name=su-mode]:checked', el).value;
+    const read = () => ({ mode: getMode(), goal: $('#su-goal', el).value, raceDate: $('#su-date', el).value, vma: num($('#su-vma', el).value), days: $$('.days input[type=checkbox]:checked', el).map(i => Number(i.value)) });
     let last = null;
     const prev = () => {
-      const q = read(); const r = F.genPlan(q, TODAY); last = r;
+      const q = read(), free = q.mode === 'free';
+      $('#su-race', el).hidden = free;
+      $('#su-modehelp', el).textContent = free
+        ? 'Sans date de course : cycles de 4 semaines (3 de progression, 1 plus légère), renouvelés automatiquement, avec un test de VMA toutes les 8 semaines. Tu peux te fixer une course à tout moment.'
+        : 'Plan construit jusqu’au jour J (16 semaines maximum), avec affûtage la dernière semaine.';
+      $('#su-submit', el).textContent = free ? 'Lancer le mode entretien' : 'Enregistrer ce plan';
+      const firstMon = F.mondayOf(F.addDays(TODAY, 1));
+      const r = free ? { ...F.genFree(q, TODAY, firstMon, 0, 6), firstMon, weeks: 6 } : F.genPlan(q, TODAY);
+      last = r;
       const box = $('#su-prev', el);
       if (r.error || !(q.vma >= 8 && q.vma <= 25)) { box.innerHTML = `<p class="err">${esc(r.error || 'Indique une VMA entre 8 et 25 km/h.')}</p>`; return; }
-      const c = { vma: q.vma, goal: q.goal };
+      const c = { vma: q.vma, goal: free ? '10k' : q.goal };
       const km = r.workouts.reduce((a, w) => a + F.wTD(w, c).d / 1000, 0);
       const firstQ = r.workouts.find(w => w.type === 'frac');
-      box.innerHTML = `<div class="spread"><b class="num">${r.weeks} semaines · ${r.workouts.length} séances</b><span class="small muted num">≈ ${F.fmtKm(km / r.weeks, 0)} km/sem.</span></div>
-        <div class="small muted num">EF ${F.fmtPace(F.paceRange('ef', c)[0])}–${F.fmtPace(F.paceRange('ef', c)[1])} · Seuil ${F.fmtPace(F.paceRange('seuil', c)[0])}–${F.fmtPace(F.paceRange('seuil', c)[1])} · ${F.zoneLabel('as', q.goal)} ${F.fmtPace(F.paceMid('as', c))} · VMA ${F.fmtPace(F.paceRange('vma', c)[0])} /km</div>
+      box.innerHTML = `<div class="spread"><b class="num">${free ? `Cycle de 4 semaines · ${q.days.length} séances/sem.` : `${r.weeks} semaines · ${r.workouts.length} séances`}</b><span class="small muted num">≈ ${F.fmtKm(km / r.weeks, 0)} km/sem.</span></div>
+        <div class="small muted num">EF ${F.fmtPace(F.paceRange('ef', c)[0])}–${F.fmtPace(F.paceRange('ef', c)[1])} · Seuil ${F.fmtPace(F.paceRange('seuil', c)[0])}–${F.fmtPace(F.paceRange('seuil', c)[1])} · ${F.zoneLabel('as', c.goal)} ${F.fmtPace(F.paceMid('as', c))} · VMA ${F.fmtPace(F.paceRange('vma', c)[0])} /km</div>
         ${firstQ ? `<div class="small">Première séance de qualité : <b>${esc(F.notation(firstQ, c))}</b></div>` : ''}`;
     };
     el.querySelector('form').addEventListener('input', prev);
+    el.querySelector('form').addEventListener('change', prev);
     prev();
     $('#su-calc', el).onclick = () => {
-      const d = Number($('#su-ed', el).value), t = parseDur($('#su-et', el).value.includes(':') ? $('#su-et', el).value : $('#su-et', el).value + ':00');
+      const raw = $('#su-et', el).value, d = Number($('#su-ed', el).value), t = parseDur(raw.includes(':') ? raw : raw + ':00');
       if (!t) { toast('Saisis un chrono au format mm:ss ou h:mm:ss.'); return; }
       const pct = d <= 5 ? 0.95 : d <= 10 ? 0.90 : 0.85;
       $('#su-vma', el).value = (d / (t / 3600) / pct).toFixed(1); prev();
@@ -854,20 +919,32 @@ function sheetSetup() {
       const err = $('#su-err', el);
       if (!last || last.error || !(q.vma >= 8 && q.vma <= 25)) { err.hidden = false; err.textContent = last?.error || 'Vérifie la VMA (entre 8 et 25 km/h).'; return; }
       const keep = (S.plan?.workouts || []).filter(w => !w.auto || w.date < TODAY || isDone(w));
-      const btn = e.submitter || $('button[type=submit]', el); btn.disabled = true; btn.textContent = 'Enregistrement…';
-      const ok1 = await Store.saveProfile({ ...q, updated: new Date().toISOString() });
-      const ok2 = ok1 && await Store.savePlan({ firstMon: last.firstMon, weeks: last.weeks, workouts: keep.concat(last.workouts) });
-      if (ok2) { closeSheet(); S.tab = 'plan'; toast('Plan enregistré'); schedule(); } else { btn.disabled = false; btn.textContent = 'Enregistrer ce plan'; }
+      const free = q.mode === 'free';
+      const profile = { ...q, updated: new Date().toISOString() };
+      if (free) { profile.goal = S.profile?.goal || q.goal; profile.raceDate = null; }
+      const plan = free ? { mode: 'free', firstMon: last.firstMon, genWeeks: 6, workouts: keep.concat(last.workouts) }
+                        : { mode: 'race', firstMon: last.firstMon, weeks: last.weeks, workouts: keep.concat(last.workouts) };
+      const ok = await Store.saveProfile(profile) && await Store.savePlan(plan);
+      if (ok) { closeSheet(); S.tab = 'plan'; toast(free ? 'Mode entretien lancé' : 'Plan enregistré'); schedule(); }
     };
   });
 }
-
+/* keep the maintenance plan rolling: always ~6 weeks of sessions ahead */
+async function extendFree() {
+  if (!isFree() || S.plan?.mode !== 'free' || !S.plan.firstMon) return;
+  const cur = Math.floor(F.daysBetween(S.plan.firstMon, F.mondayOf(TODAY)) / 7);
+  const target = cur + 6, from = Math.max(S.plan.genWeeks || 0, cur);
+  if (from >= target) return;
+  const r = F.genFree(S.profile, TODAY, S.plan.firstMon, from, target - from);
+  if (r.error) return;
+  await Store.savePlan({ ...S.plan, genWeeks: target, workouts: (S.plan.workouts || []).concat(r.workouts) });
+}
 function stepsHtml(w) {
   const c = ctx();
   const KL = { wu: 'Échauffement', run: 'Effort', rec: 'Récupération', cd: 'Retour au calme' };
   const one = s => {
     const [f, sl] = F.paceRange(s.z, c);
-    const lbl = s.k === 'run' && (s.z === 'ef' || s.z === 'recup') && w.steps.length === 1 ? 'Course continue' : (w.type === 'course' ? 'Course' : KL[s.k]);
+    const lbl = s.k === 'run' && (s.z === 'ef' || s.z === 'recup') && w.steps.length === 1 ? 'Course continue' : (w.type === 'course' ? 'Course' : w.type === 'test' && s.k === 'run' ? '6 minutes à fond, allure régulière' : KL[s.k]);
     return `<div class="step" style="--zc:${zc(s.z)}"><i></i><div class="what"><b>${esc(F.fmtVal(s))} · ${esc(F.zoneLabel(s.z, c.goal))}</b><small>${esc(lbl)}</small></div>
       <div class="pace num">${F.fmtPace(f)}–${F.fmtPace(sl)}<small>min/km</small></div></div>`;
   };
@@ -904,6 +981,7 @@ function sheetWorkout(id) {
 const TYPE_DEFAULTS = {
   ef: { struct: false, cv: 45, cu: 'min', cz: 'ef' }, sl: { struct: false, cv: 70, cu: 'min', cz: 'ef' }, recup: { struct: false, cv: 30, cu: 'min', cz: 'recup' },
   frac: { struct: true, wu: 20, n: 10, v: 400, vu: 'm', z: 'vma', r: 75, ru: 's', cd: 10 }, course: { struct: false, cv: 10, cu: 'km', cz: 'as' },
+  test: { struct: true, wu: 20, n: 1, v: 6, vu: 'min', z: 'vma', r: 0, ru: 's', cd: 10 },
 };
 function sheetEdit(w) {
   const isNew = !w;
@@ -1214,7 +1292,7 @@ function sheetSettings() {
 $('#settings').onclick = sheetSettings;
 
 render();
-Store.init();
+Store.init().then(extendFree);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
 </script>
