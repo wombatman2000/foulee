@@ -74,7 +74,7 @@ main{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px
 /* bottom tabs */
 .tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--surface);border-top:1px solid var(--line);
   padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px))}
-.tabs-in{max-width:640px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.tabs-in{max-width:640px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
 .tab{appearance:none;border:0;background:none;padding:6px 4px;border-radius:10px;display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--muted);cursor:pointer;font:600 13px/1.1 var(--f-body)}
 .tab svg{width:22px;height:22px}
 .tab[aria-current="page"]{color:var(--accent)}
@@ -235,6 +235,24 @@ input[type=range]{accent-color:var(--accent);padding:0;min-height:30px}
 .rep-in .step{padding-left:0;margin-left:14px}
 .ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px}
 
+.status{border-radius:14px;padding:16px 16px 16px 20px;background:var(--surface);border:1px solid var(--line);position:relative;overflow:hidden;display:flex;flex-direction:column;gap:6px}
+.status::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--lc,var(--muted))}
+.status .big{font:700 30px/1.05 var(--f-display);color:var(--lc,var(--ink))}
+.lv-ok{--lc:var(--ok)} .lv-warn{--lc:var(--warn)} .lv-alert{--lc:var(--accent)} .lv-none{--lc:var(--muted)}
+.signal{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:12px 0;border-top:1px solid var(--line)}
+.signal:first-child{border-top:0;padding-top:0}
+.signal b{font:600 17px/1.2 var(--f-display)}
+.signal p{grid-column:1/-1;font-size:14px;color:var(--muted)}
+.signal .val{font:700 18px/1.2 var(--f-display);text-align:right;font-variant-numeric:tabular-nums}
+.chart .fit{fill:none;stroke:var(--ink);stroke-width:2}
+.chart .fat{fill:none;stroke:var(--accent);stroke-width:2}
+.scale{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.scale label{position:relative}
+.scale input{position:absolute;opacity:0;inset:0}
+.scale span{display:flex;align-items:center;justify-content:center;height:40px;border-radius:8px;border:1px solid var(--line);font:700 16px var(--f-display);background:var(--bg);cursor:pointer}
+.scale input:checked + span{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.scale input:focus-visible + span{outline:2px solid var(--accent);outline-offset:2px}
+.src li{font-size:14px}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:15px;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
 
 @media (max-width:380px){ .metrics{grid-template-columns:repeat(2,1fr)} .kpi .v{font-size:24px} }
@@ -247,6 +265,7 @@ input[type=range]{accent-color:var(--accent);padding:0;min-height:30px}
 <nav class="tabs" aria-label="Sections"><div class="tabs-in">
   <button class="tab" data-tab="plan" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>Plan</button>
   <button class="tab" data-tab="journal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h4l2.5-6 4 11 2.5-5H21"/></svg>Journal</button>
+  <button class="tab" data-tab="forme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l3.5-4.5"/><circle cx="12" cy="16" r="1.2"/></svg>Forme</button>
   <button class="tab" data-tab="routes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M8 18h6.5a3.5 3.5 0 0 0 0-7h-5a3.5 3.5 0 0 1 0-7H16"/></svg>Parcours</button>
 </div></nav>
 <dialog id="sheet" aria-label="Détail"></dialog>
@@ -292,7 +311,7 @@ const FOULEE = (() => {
   };
   const fmtDurRound = s => s >= 3600 ? fmtDur(Math.round(s / 60) * 60) : `${Math.round(s / 60)}'`;
   const fmtKm = (km, dec = 1) => km.toLocaleString('fr-FR', { maximumFractionDigits: dec, minimumFractionDigits: 0 });
-  const fmtDist = m => m >= 1000 ? `${fmtKm(m / 1000, 3).replace(/,?0+$/, '')} km` : `${Math.round(m)} m`;
+  const fmtDist = m => m >= 1000 ? `${fmtKm(m / 1000, 3)} km` : `${Math.round(m)} m`;
   const fmtVal = st => st.by === 'time' ? fmtDur(st.v) : fmtDist(st.v);
 
   function notation(w, c) {
@@ -315,6 +334,11 @@ const FOULEE = (() => {
   }
 
   // ---------- plan generation ----------
+  // Principles (see the Forme page sources):
+  //  - most training time easy, at most 2 quality sessions a week (Seiler 2010; Stöggl & Sperlich 2015)
+  //  - weekly volume chosen by bracket, grows ≤ 8 %/week up to a ceiling, lighter week every 4th week
+  //    (Nielsen 2014: > 30 % over two weeks linked to distance-related injuries)
+  //  - longest run never more than 10 % above the longest of the previous weeks (Frandsen 2025)
   const S_ = (k, by, v, z) => ({ k, by, v, z });
   const round5 = x => Math.max(5, Math.round(x / 5) * 5);
   const cont = (min, z = 'ef') => [S_('run', 'time', min * 60, z)];
@@ -341,7 +365,61 @@ const FOULEE = (() => {
   let seq = 0;
   const uid = p => p + Date.now().toString(36) + (seq++).toString(36) + Math.random().toString(36).slice(2, 6);
 
-  function genPlan(p, today) {
+  const BRACKETS = [[0, 10], [10, 20], [20, 30], [30, 40], [40, 50], [50, 65], [65, 80], [80, 100]].map(([lo, hi]) => ({ id: `${lo}-${hi}`, lo, hi, label: `${lo}–${hi} km` }));
+  const bracket = id => BRACKETS.find(b => b.id === id) || BRACKETS[2];
+  const LONG_SHARE = { 1: 1, 2: 0.45, 3: 0.38, 4: 0.32, 5: 0.3, 6: 0.28, 7: 0.26 };
+  const LONG_MAX = { '5k': 16, '10k': 20, semi: 26, marathon: 34, free: 20 };
+  const GROWTH = 1.08, LONG_GROWTH = 1.10, DELOAD = 0.78, TAPER = 0.7;
+  const TEST_NOTE = "Test de VMA (demi-Cooper) : après l'échauffement, cours 6 minutes le plus vite possible à allure régulière. Ta VMA en km/h = distance parcourue en mètres ÷ 100 (ex. 1 450 m → 14,5 km/h). Mets-la ensuite à jour dans Plan › Modifier.";
+
+  function volumeSetup(p, opts = {}) {
+    const cur = bracket(p.vol), max = bracket(p.volMax || p.vol);
+    const start = Math.max(6, (cur.lo + cur.hi) / 2);
+    const ceil = Math.max(start, max.hi);
+    const share = LONG_SHARE[(p.days || []).length] || 0.3;
+    const longMax = LONG_MAX[p.mode === 'free' ? 'free' : p.goal] || 20;
+    const startLong = opts.longest30 > 0 ? opts.longest30 : start * share;
+    return { start, ceil, share, longMax, startLong };
+  }
+  // b = number of normal (progressing) weeks before this one
+  const weekVolume = (vs, b) => Math.min(vs.ceil, vs.start * Math.pow(GROWTH, b));
+  const weekLong = (vs, K, b) => Math.min(vs.longMax, vs.share * K, vs.startLong * Math.pow(LONG_GROWTH, b + 1));
+
+  // Fill one week: quality sessions are fixed, the long run follows its cap, easy runs absorb the rest.
+  function fillWeek({ mon, start, days, roles, K, longKm, quals, c, mk, longAS }) {
+    const efPace = paceMid('ef', c);
+    const kmToMin = km => km * efPace / 60;
+    const slots = days.map((wd, j) => ({ d: addDays(mon, wd), r: roles[j] }));
+    let qi = 0, used = 0;
+    const kmOf = steps => wTD({ steps }, c).d / 1000;
+    for (const s of slots) {
+      if (s.r === 'q' || s.r === 'q2') {
+        const q = quals[qi++];
+        if (!q) { s.r = 'ef'; continue; }
+        s.steps = q.steps; s.type = q.type; s.notes = q.notes; used += kmOf(s.steps);
+      } else if (s.r === 'recup') { s.steps = cont(30, 'recup'); s.type = 'recup'; used += kmOf(s.steps); }
+      else if (s.r === 'sl') {
+        const T = round5(Math.min(165, kmToMin(longKm)));
+        if (longAS && T >= 60) {
+          const blk = longAS, n = 3, rec = 3, rest = Math.max(15, T - n * blk - (n - 1) * rec - 10);
+          s.steps = [S_('run', 'time', rest * 60, 'ef'), { k: 'rep', n, steps: [S_('run', 'time', blk * 60, 'as'), S_('rec', 'time', rec * 60, 'ef')] }, S_('cd', 'time', 600, 'recup')];
+        } else s.steps = cont(T);
+        s.type = 'sl'; used += kmOf(s.steps);
+      }
+    }
+    const efs = slots.filter(s => s.r === 'ef');
+    if (efs.length) {
+      const per = Math.max(4, Math.min(longKm * 0.8, (K - used) / efs.length));
+      efs.forEach(s => { s.steps = cont(Math.max(25, round5(kmToMin(per)))); s.type = 'ef'; });
+    }
+    return slots.filter(s => s.d >= start && s.steps).map(s => mk(s.d, s.type, s.steps, s.notes));
+  }
+  const qVMA = (i, f) => { const q = VMA_POOL[i % VMA_POOL.length]; return { type: 'frac', steps: frac({ ...q, z: 'vma', n: scaleN(q.n, f) }) }; };
+  const qQ2 = (i, f, asOnly) => { const pool = asOnly ? Q2_POOL.filter(x => x.z === 'as') : Q2_POOL; const q = pool[i % pool.length]; return { type: 'frac', steps: frac({ ...q, n: scaleN(q.n, f) }) }; };
+  const qTest = () => ({ type: 'test', steps: frac({ wu: 20, n: 1, by: 'time', v: 360, z: 'vma', rec: 0, cd: 10 }), notes: TEST_NOTE });
+  const scaleN = (n, f) => n <= 1 ? 1 : Math.max(2, Math.round(n * Math.min(1, f)));
+
+  function genPlan(p, today, opts = {}) {
     const g = GOALS[p.goal];
     if (!g) return { error: 'Choisis un objectif.' };
     if (!p.raceDate) return { error: 'Indique la date de la course.' };
@@ -349,92 +427,83 @@ const FOULEE = (() => {
     if (p.raceDate <= start) return { error: 'La date de course doit être au moins dans deux jours.' };
     const days = [...(p.days || [])].map(Number).sort((a, b) => a - b);
     if (!days.length) return { error: "Choisis au moins un jour d'entraînement." };
+    if (bracket(p.volMax).hi < bracket(p.vol).hi) return { error: 'Le volume maximum doit être au moins égal à ton volume actuel.' };
     const raceMon = mondayOf(p.raceDate);
     let firstMon = mondayOf(start);
     let weeks = daysBetween(firstMon, raceMon) / 7 + 1;
     if (weeks < 2) return { error: 'Moins de deux semaines avant la course : trop court pour construire un plan.' };
     if (weeks > 16) { firstMon = addDays(raceMon, -105); weeks = 16; }
     const roles = ROLES[days.length];
-    const long = p.goal === 'semi' || p.goal === 'marathon';
-    const out = [];
-    let vi = 0, qi = 0;
-    const mk = (date, type, steps) => ({ id: uid('w'), date, type, steps, auto: true });
+    const c = { vma: p.vma, goal: p.goal };
+    const vs = volumeSetup(p, opts);
+    const longGoal = p.goal === 'semi' || p.goal === 'marathon';
+    const out = [], targets = {};
+    const mk = (date, type, steps, notes) => ({ id: uid('w'), date, type, steps, auto: true, ...(notes ? { notes } : {}) });
+    let b = 0, vi = 0, qi = 0, peakK = vs.start;
     for (let i = 0; i < weeks; i++) {
-      const mon = addDays(firstMon, i * 7);
-      const left = weeks - 1 - i;
-      const taper = left === 1, deload = left > 1 && (i + 1) % 4 === 0;
-      const f = taper ? 0.7 : deload ? 0.8 : (weeks > 3 ? 0.8 + 0.2 * Math.min(1, i / (weeks - 3)) : 1);
-      const late = left <= Math.max(2, Math.floor(weeks / 3));
-      const scale = n => n <= 1 ? 1 : Math.max(2, Math.round(n * Math.min(1, f / 0.95)));
+      const mon = addDays(firstMon, i * 7), left = weeks - 1 - i;
       if (left === 0) {
         const pre = days.map(wd => addDays(mon, wd)).filter(d => d >= start && d < addDays(p.raceDate, -1));
         pre.forEach((d, j) => out.push(j === 0 ? mk(d, 'frac', frac({ wu: 20, n: 5, by: 'time', v: 60, z: 'as', rec: 60, cd: 10 })) : mk(d, 'ef', cont(25))));
         out.push(mk(p.raceDate, 'course', [S_('run', 'dist', Math.round(g.km * 1000), 'as')]));
         continue;
       }
-      days.forEach((wd, j) => {
-        const d = addDays(mon, wd);
-        if (d < start) return;
-        const r = roles[j];
-        if (r === 'sl') {
-          const tot = round5(g.sl * f);
-          if (long && late && !taper && tot >= 60) {
-            const blk = p.goal === 'marathon' ? 15 : 10, n = 3, rec = 3;
-            const rest = Math.max(15, tot - n * blk - (n - 1) * rec - 10);
-            out.push(mk(d, 'sl', [S_('run', 'time', rest * 60, 'ef'), { k: 'rep', n, steps: [S_('run', 'time', blk * 60, 'as'), S_('rec', 'time', rec * 60, 'ef')] }, S_('cd', 'time', 600, 'recup')]));
-          } else out.push(mk(d, 'sl', cont(tot)));
-        } else if (r === 'ef') out.push(mk(d, 'ef', cont(round5((p.goal === '5k' ? 40 : 45) * f))));
-        else if (r === 'recup') out.push(mk(d, 'recup', cont(30, 'recup')));
-        else {
-          const single = !roles.includes('q2');
-          const useQ2 = r === 'q2' || (single && (late || i % 2 === 1));
-          if (useQ2) {
-            const pool = late ? Q2_POOL.filter(x => x.z === 'as') : Q2_POOL;
-            const q = pool[qi++ % pool.length];
-            out.push(mk(d, 'frac', frac({ ...q, n: scale(q.n) })));
-          } else {
-            const q = VMA_POOL[vi++ % VMA_POOL.length];
-            out.push(mk(d, 'frac', frac({ ...q, z: 'vma', n: scale(q.n) })));
-          }
-        }
+      const taper = left === 1, deload = !taper && left > 1 && (i + 1) % 4 === 0;
+      const baseK = weekVolume(vs, b);
+      const K = taper ? TAPER * peakK : deload ? DELOAD * baseK : baseK;
+      if (!taper && !deload) peakK = Math.max(peakK, K);
+      const longKm = (taper || deload ? 0.8 : 1) * weekLong(vs, baseK, b);
+      const f = taper || deload ? 0.75 : Math.min(1, 0.8 + 0.2 * b / 6);
+      const late = left <= Math.max(2, Math.floor(weeks / 3));
+      const quals = [];
+      roles.forEach(r => {
+        if (r === 'q') { const single = !roles.includes('q2'); quals.push(single && (late || i % 2 === 1) ? qQ2(qi++, f, late) : qVMA(vi++, f)); }
+        else if (r === 'q2') quals.push(qQ2(qi++, f, late));
       });
+      targets[mon] = Math.round(K);
+      out.push(...fillWeek({ mon, start, days, roles, K, longKm, quals, c, mk, longAS: longGoal && late && !taper ? (p.goal === 'marathon' ? 15 : 10) : 0 }));
+      if (!taper && !deload) b++;
     }
-    return { workouts: out, weeks, firstMon };
+    return { workouts: out, weeks, firstMon, targets };
   }
 
-  // ---------- maintenance (no race) rolling plan ----------
-  const BLOCK_F = [0.85, 0.92, 1.0, 0.75];
-  const TEST_NOTE = "Test de VMA (demi-Cooper) : après l'échauffement, cours 6 minutes le plus vite possible à allure régulière. Ta VMA en km/h = distance parcourue en mètres ÷ 100 (ex. 1 450 m → 14,5 km/h). Mets-la ensuite à jour dans Plan › Modifier.";
-  function genFree(p, today, firstMon, fromWeek, nWeeks) {
+  function genFree(p, today, firstMon, fromWeek, nWeeks, opts = {}) {
     const days = [...(p.days || [])].map(Number).sort((a, b) => a - b);
     if (!days.length) return { error: "Choisis au moins un jour d'entraînement." };
+    if (bracket(p.volMax).hi < bracket(p.vol).hi) return { error: 'Le volume maximum doit être au moins égal à ton volume actuel.' };
     const roles = ROLES[days.length];
+    const c = { vma: p.vma, goal: '10k' };
+    const vs = volumeSetup({ ...p, mode: 'free' }, opts);
     const start = addDays(today, 1);
-    const out = [];
+    const out = [], targets = {};
     const mk = (date, type, steps, notes) => ({ id: uid('w'), date, type, steps, auto: true, ...(notes ? { notes } : {}) });
     for (let i = fromWeek; i < fromWeek + nWeeks; i++) {
       const mon = addDays(firstMon, i * 7);
-      const pos = i % 4, block = Math.floor(i / 4);
-      const f = BLOCK_F[pos] * Math.min(1.15, 1 + 0.03 * block);
-      const test = i % 8 === 7;
-      const scale = n => n <= 1 ? 1 : Math.max(2, Math.round(n * Math.min(1, f)));
+      const pos = i % 4, deload = pos === 3, b = i - Math.floor(i / 4);
+      const baseK = weekVolume(vs, b);
+      const K = deload ? DELOAD * baseK : baseK;
+      const longKm = (deload ? 0.8 : 1) * weekLong(vs, baseK, b);
+      const f = deload ? 0.75 : Math.min(1, 0.8 + 0.2 * b / 6);
+      const quals = [];
       let tested = false;
-      days.forEach((wd, j) => {
-        const d = addDays(mon, wd);
-        if (d < start) return;
-        const r = roles[j];
-        if (r === 'sl') out.push(mk(d, 'sl', cont(round5(65 * f))));
-        else if (r === 'ef') out.push(mk(d, 'ef', cont(round5(45 * f))));
-        else if (r === 'recup') out.push(mk(d, 'recup', cont(30, 'recup')));
-        else if (test && !tested) { tested = true; out.push(mk(d, 'test', frac({ wu: 20, n: 1, by: 'time', v: 360, z: 'vma', rec: 0, cd: 10 }), TEST_NOTE)); }
-        else {
-          const useQ2 = r === 'q2' || (!roles.includes('q2') && i % 2 === 1);
-          if (useQ2) { const q = Q2_POOL[i % Q2_POOL.length]; out.push(mk(d, 'frac', frac({ ...q, n: scale(q.n) }))); }
-          else { const q = VMA_POOL[i % VMA_POOL.length]; out.push(mk(d, 'frac', frac({ ...q, z: 'vma', n: scale(q.n) }))); }
-        }
+      roles.forEach(r => {
+        if (r !== 'q' && r !== 'q2') return;
+        if (i % 8 === 7 && !tested) { tested = true; quals.push(qTest()); return; }
+        const useQ2 = r === 'q2' || (!roles.includes('q2') && i % 2 === 1);
+        quals.push(useQ2 ? qQ2(i, f) : qVMA(i, f));
       });
+      targets[mon] = Math.round(K);
+      out.push(...fillWeek({ mon, start, days, roles, K, longKm, quals, c, mk }));
     }
-    return { workouts: out };
+    return { workouts: out, targets };
+  }
+
+  // share of running time spent at threshold or faster
+  function hardShare(ws, c) {
+    let hard = 0, tot = 0;
+    const walk = (s, m) => { if (s.k === 'rep') { s.steps.forEach(x => walk(x, m * s.n)); return; } const t = stepTD(s, c).t * m; tot += t; if (['seuil', 'vma', 'as'].includes(s.z)) hard += t; };
+    ws.forEach(w => w.steps.forEach(s => walk(s, 1)));
+    return tot ? hard / tot : 0;
   }
 
   // ---------- Garmin FIT workout encoder ----------
@@ -535,7 +604,7 @@ const FOULEE = (() => {
     return new Uint8Array(w.a);
   }
 
-  return { pad, iso, parseD, addDays, mondayOf, daysBetween, GOALS, zoneLabel, paceRange, paceMid, stepTD, wTD, fmtPace, fmtDur, fmtDurRound, fmtKm, fmtDist, fmtVal, notation, mainZone, S_, cont, frac, genPlan, genFree, uid, ascii, encodeFit, zip };
+  return { pad, iso, parseD, addDays, mondayOf, daysBetween, GOALS, zoneLabel, paceRange, paceMid, stepTD, wTD, fmtPace, fmtDur, fmtDurRound, fmtKm, fmtDist, fmtVal, notation, mainZone, S_, cont, frac, genPlan, genFree, hardShare, BRACKETS, bracket, uid, ascii, encodeFit, zip };
 })();
 if (typeof module !== 'undefined') module.exports = FOULEE;
 </script>
@@ -582,8 +651,8 @@ const Store = {
     try { this.apply(JSON.parse(localStorage.getItem(LS) || '{}')); }
     catch (e) { S.note = 'Impossible de lire les données enregistrées sur ce téléphone.'; }
   },
-  apply(d) { S.profile = d.profile || null; S.plan = d.plan || null; S.runs = d.runs || []; S.routes = d.routes || []; S.lastBackup = d.lastBackup || null; },
-  dump() { return { app: 'foulee', version: 1, savedAt: new Date().toISOString(), profile: S.profile, plan: S.plan, runs: S.runs, routes: S.routes, lastBackup: S.lastBackup || null }; },
+  apply(d) { S.profile = d.profile || null; S.plan = d.plan || null; S.runs = d.runs || []; S.routes = d.routes || []; S.wellness = d.wellness || []; S.lastBackup = d.lastBackup || null; },
+  dump() { return { app: 'foulee', version: 1, savedAt: new Date().toISOString(), profile: S.profile, plan: S.plan, runs: S.runs, routes: S.routes, wellness: S.wellness || [], lastBackup: S.lastBackup || null }; },
   saveLocal() {
     try { localStorage.setItem(LS, JSON.stringify(this.dump())); }
     catch (e) { toast("Le téléphone a refusé l'enregistrement (stockage plein ou bloqué)."); schedule(); return false; }
@@ -596,6 +665,7 @@ const Store = {
   delRun(id) { return this.run(() => { S.runs = S.runs.filter(x => x.id !== id); }); },
   saveRoute(r) { return this.run(() => { S.routes = S.routes.filter(x => x.id !== r.id).concat(r); }); },
   delRoute(id) { return this.run(() => { S.routes = S.routes.filter(x => x.id !== id); }); },
+  saveWell(e) { return this.run(() => { S.wellness = (S.wellness || []).filter(x => x.date !== e.date).concat(e); }); },
 };
 async function saveWorkout(w) {
   const list = (S.plan?.workouts || []).filter(x => x.id !== w.id).concat(w);
@@ -651,7 +721,7 @@ function render() {
   if (!S.ready) { v.innerHTML = `<div class="col"><div class="empty"><p class="muted">Chargement de ton carnet…</p></div></div>`; return; }
   const stale = S.runs.length >= 3 && (!S.lastBackup || F.daysBetween(S.lastBackup, TODAY) > 30);
   const note = (S.note ? `<div class="note">${esc(S.note)}</div>` : '') + (stale ? `<button class="note info" style="border:0;text-align:left;cursor:pointer" data-act="backup">Pense à sauvegarder tes données : dernière sauvegarde ${S.lastBackup ? 'le ' + esc(fmtDay(S.lastBackup, { day: 'numeric', month: 'long' })) : 'jamais faite'}. Toucher pour sauvegarder.</button>` : '');
-  v.innerHTML = `<div class="col">${note}${S.tab === 'plan' ? viewPlan() : S.tab === 'journal' ? viewJournal() : viewRoutes()}</div>`;
+  v.innerHTML = `<div class="col">${note}${S.tab === 'plan' ? viewPlan() : S.tab === 'journal' ? viewJournal() : S.tab === 'forme' ? viewForme() : viewRoutes()}</div>`;
   bindView(v);
 }
 
@@ -720,7 +790,7 @@ function viewPlan() {
     const exportable = list.filter(w => w.date >= TODAY && !isDone(w));
     return `<section class="week">
       <div class="week-h"><h3>${n > 0 ? `S${n} ` : ''}<span>· ${esc(fmtDay(mon, { day: 'numeric', month: 'short' }))} – ${esc(fmtDay(F.addDays(mon, 6), { day: 'numeric', month: 'short' }))}</span></h3>
-      <div class="week-tools"><span class="num">≈ ${F.fmtKm(km, 0)} km</span>${exportable.length > 1 ? `<button class="btn ghost" data-export-week="${mon}">Export Garmin</button>` : ''}</div></div>
+      <div class="week-tools"><span class="num">≈ ${F.fmtKm(km, 0)} km${S.plan?.targets?.[mon] ? ` <span class="muted">(cible ${Math.round(S.plan.targets[mon] * 0.9)}–${Math.round(S.plan.targets[mon] * 1.1)})</span>` : ''}</span>${exportable.length > 1 ? `<button class="btn ghost" data-export-week="${mon}">Export Garmin</button>` : ''}</div></div>
       ${list.map(w => sessRow(w)).join('')}</section>`;
   };
   const past = [], future = [];
@@ -846,9 +916,143 @@ function bindView(v) {
     const mon = b.dataset.exportWeek, sun = F.addDays(mon, 6);
     exportGarmin(workouts().filter(w => w.date >= mon && w.date <= sun && w.date >= TODAY && !isDone(w)), `semaine-${mon}`);
   });
-  $$('[data-act]', v).forEach(b => b.onclick = () => ({ setup: () => sheetSetup(), race: () => sheetSetup('race'), free: () => sheetSetup('free'), 'add-w': () => sheetEdit(null), 'add-run': () => sheetRun(null), 'add-route': () => sheetRoute(null), backup: sheetSettings })[b.dataset.act]());
+  $$('[data-act]', v).forEach(b => b.onclick = () => ({ setup: () => sheetSetup(), race: () => sheetSetup('race'), free: () => sheetSetup('free'), 'add-w': () => sheetEdit(null), 'add-run': () => sheetRun(null), 'add-route': () => sheetRoute(null), backup: sheetSettings, well: sheetWell })[b.dataset.act]());
 }
 $$('.tab').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; render(); window.scrollTo(0, 0); });
+
+
+/* ---------- Forme: fatigue & load indicators ---------- */
+// longest run in the 30 days before `ref` (exclusive)
+function longest30(ref = F.addDays(TODAY, 1)) {
+  const from = F.addDays(ref, -30);
+  return S.runs.filter(r => r.date >= from && r.date < ref).reduce((m, r) => Math.max(m, Number(r.dist) || 0), 0);
+}
+const HOOPER = [['sleep', 'Sommeil', '1 excellent · 7 très mauvais'], ['fatigue', 'Fatigue', '1 très frais · 7 épuisé'], ['stress', 'Stress', '1 très détendu · 7 très stressé'], ['soreness', 'Courbatures', '1 aucune · 7 très fortes']];
+const hooperSum = e => HOOPER.reduce((a, [k]) => a + (Number(e[k]) || 0), 0);
+function analyse() {
+  const runs = S.runs.filter(r => r.date <= TODAY).slice().sort((a, b) => a.date.localeCompare(b.date));
+  const load = r => (Number(r.rpe) || 5) * (Number(r.dur) || 0) / 60; // session-RPE (CR-10 × minutes)
+  const daily = new Map();
+  runs.forEach(r => daily.set(r.date, (daily.get(r.date) || 0) + load(r)));
+  const A = { n: runs.length, span: runs.length ? F.daysBetween(runs[0].date, TODAY) + 1 : 0 };
+  let ctl = 0, atl = 0; const series = [];
+  if (runs.length) {
+    const kf = 1 - Math.exp(-1 / 42), ka = 1 - Math.exp(-1 / 7);
+    let d = F.addDays(TODAY, -364) > runs[0].date ? F.addDays(TODAY, -364) : runs[0].date;
+    for (; d <= TODAY; d = F.addDays(d, 1)) { const L = daily.get(d) || 0; ctl += (L - ctl) * kf; atl += (L - atl) * ka; series.push({ d, ctl, atl }); }
+  }
+  Object.assign(A, { ctl, atl, series: series.slice(-56) });
+  const last7 = Array.from({ length: 7 }, (_, i) => daily.get(F.addDays(TODAY, -i)) || 0);
+  const sum7 = last7.reduce((a, b) => a + b, 0), mean = sum7 / 7, sd = Math.sqrt(last7.reduce((a, b) => a + (b - mean) ** 2, 0) / 7);
+  A.week = sum7; A.monotony = mean > 0 ? (sd > 0 ? mean / sd : Infinity) : null;
+  const kmBetween = (a, b) => runs.filter(r => r.date >= a && r.date <= b).reduce((t, r) => t + (Number(r.dist) || 0), 0);
+  A.km7 = kmBetween(F.addDays(TODAY, -6), TODAY);
+  A.kmPrev2 = kmBetween(F.addDays(TODAY, -20), F.addDays(TODAY, -14));
+  A.hasPrev2 = runs.some(r => r.date <= F.addDays(TODAY, -14));
+  let spike = null;
+  runs.filter(r => r.date >= F.addDays(TODAY, -6)).forEach(r => {
+    const ref = longest30(r.date);
+    if (!ref) return;
+    const ratio = (Number(r.dist) || 0) / ref - 1;
+    if (!spike || ratio > spike.ratio) spike = { ratio, run: r, ref };
+  });
+  A.spike = spike;
+  const l30 = longest30();
+  A.longCap = l30 ? l30 * 1.1 : null;
+  const well = (S.wellness || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  A.today = well.find(e => e.date === TODAY) || null;
+  const base = well.filter(e => e.date < TODAY && e.date >= F.addDays(TODAY, -28)).map(hooperSum);
+  if (base.length >= 5) { const m = base.reduce((a, b) => a + b, 0) / base.length; A.wellBase = { m, sd: Math.max(1, Math.sqrt(base.reduce((a, b) => a + (b - m) ** 2, 0) / base.length)), n: base.length }; }
+  return A;
+}
+function signals(A) {
+  const out = [];
+  const pct = x => `${x > 0 ? '+' : ''}${Math.round(x * 100)} %`;
+  if (A.spike) {
+    const p = A.spike.ratio, lv = p > 0.3 ? 'alert' : p > 0.1 ? 'warn' : 'ok';
+    out.push({ lv, name: 'Pic de distance', val: pct(p), text: `Ta sortie du ${fmtDay(A.spike.run.date, { day: 'numeric', month: 'short' })} (${F.fmtKm(Number(A.spike.run.dist))} km) comparée à ta plus longue des 30 jours précédents (${F.fmtKm(A.spike.ref)} km). Au-delà de +10 % sur une seule sortie, le risque de blessure augmente nettement.` });
+  } else out.push({ lv: 'none', name: 'Pic de distance', val: '–', text: 'Pas de sortie cette semaine, ou pas d’historique sur 30 jours pour comparer.' });
+  if (A.longCap) {
+    const nextSL = workouts().find(w => w.type === 'sl' && w.date >= TODAY && w.date <= F.addDays(TODAY, 14) && !isDone(w));
+    const nk = nextSL ? est(nextSL).km : null;
+    out.push({ lv: nk && nk > A.longCap ? 'warn' : 'ok', name: 'Sortie la plus longue conseillée', val: `${F.fmtKm(A.longCap)} km`, text: nk ? `Ta prochaine sortie longue prévue fait environ ${F.fmtKm(nk)} km${nk > A.longCap ? ' : raccourcis-la pour rester sous le plafond.' : ', c’est dans les clous.'}` : 'Plafond = ta plus longue sortie des 30 derniers jours + 10 %.' });
+  }
+  if (A.hasPrev2 && A.kmPrev2 > 0) {
+    const ch = A.km7 / A.kmPrev2 - 1;
+    out.push({ lv: ch > 0.3 ? 'warn' : 'ok', name: 'Progression du kilométrage', val: pct(ch), text: `${F.fmtKm(A.km7)} km ces 7 derniers jours contre ${F.fmtKm(A.kmPrev2)} km deux semaines plus tôt. Une hausse de plus de 30 % en deux semaines est associée à davantage de blessures liées à la distance.` });
+  }
+  if (A.span >= 21 && A.ctl > 0) {
+    const r = (A.ctl - A.atl) / A.ctl;
+    const [lab, lv] = r > 0.1 ? ['Frais', 'ok'] : r > -0.1 ? ['Équilibré', 'ok'] : r > -0.3 ? ['En charge', 'ok'] : ['Fatigue accumulée', 'warn'];
+    out.push({ lv, name: 'Condition / fatigue', val: lab, text: `Condition (charge moyenne des ~6 dernières semaines) ${Math.round(A.ctl)}, fatigue (~7 derniers jours) ${Math.round(A.atl)}. Être « en charge » est normal à l’entraînement ; une fatigue nettement supérieure à la condition invite à alléger.` });
+  } else out.push({ lv: 'none', name: 'Condition / fatigue', val: '–', text: 'Disponible après environ 3 semaines de sorties enregistrées avec leur effort ressenti.' });
+  if (A.monotony !== null) {
+    const m = A.monotony;
+    out.push({ lv: m > 2 ? 'warn' : 'ok', name: 'Monotonie de la semaine', val: isFinite(m) ? F.fmtKm(m, 1) : 'max', text: `Charge moyenne divisée par sa variabilité sur 7 jours. Au-dessus de 2, les jours se ressemblent trop : alterne davantage jours durs, jours faciles et repos.` });
+  }
+  if (A.today) {
+    const sc = hooperSum(A.today), worst = Math.max(...HOOPER.map(([k]) => Number(A.today[k]) || 0));
+    let lv = worst >= 6 ? 'warn' : 'ok', txt = `Total ${sc}/28 (plus c’est bas, mieux c’est).`;
+    if (A.wellBase) { const z = (sc - A.wellBase.m) / A.wellBase.sd; lv = worst >= 6 || z >= 2 ? (z >= 2 ? 'alert' : 'warn') : z >= 1 ? 'warn' : 'ok'; txt += ` Ta moyenne habituelle est de ${F.fmtKm(A.wellBase.m, 1)} : ${z >= 1 ? 'tu te sens nettement moins bien que d’habitude.' : 'tu es dans ta normale.'}`; }
+    else txt += ' Ta référence personnelle sera calculée après 5 jours de saisie.';
+    out.push({ lv, name: 'Ressenti du jour', val: `${sc}/28`, text: txt });
+  } else out.push({ lv: 'none', name: 'Ressenti du jour', val: '–', text: 'Note ton sommeil, ta fatigue, ton stress et tes courbatures : c’est l’indicateur le plus sensible à la fatigue.' });
+  return out;
+}
+function formeChart(series) {
+  if (series.length < 14) return '';
+  const W = 340, H = 150, L = 26, B = 22, T = 8, R = 6;
+  const top = Math.max(10, ...series.map(p => Math.max(p.ctl, p.atl))) * 1.15;
+  const x = i => L + (W - L - R) * i / (series.length - 1), y = v => T + (H - T - B) * (1 - v / top);
+  const path = k => series.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`).join('');
+  let g = [0, top / 2].map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="lbl" x="${L - 5}" y="${y(v) + 3.5}" text-anchor="end">${Math.round(v)}</text>`).join('');
+  series.forEach((p, i) => { if ((series.length - 1 - i) % 14 === 0) { const d = F.parseD(p.d); g += `<text class="lbl" x="${x(i)}" y="${H - 6}" text-anchor="${i === series.length - 1 ? 'end' : 'middle'}">${i === series.length - 1 ? 'auj.' : `${d.getDate()}/${d.getMonth() + 1}`}</text>`; } });
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Évolution de la condition et de la fatigue sur 8 semaines">${g}<path class="fit" d="${path('ctl')}"/><path class="fat" d="${path('atl')}"/></svg>`;
+}
+function viewForme() {
+  const A = analyse(), sig = signals(A);
+  const lvs = sig.map(x => x.lv);
+  const warns = lvs.filter(l => l === 'warn').length;
+  const level = !A.n && !A.today ? 'none' : lvs.includes('alert') || warns >= 2 ? 'alert' : warns === 1 ? 'warn' : 'ok';
+  const HEAD = {
+    none: ['Pas encore de données', 'Enregistre tes sorties avec leur effort ressenti dans le Journal, et note ton ressenti du jour ici. Les indicateurs se remplissent au fil des semaines.'],
+    ok: ['Feu vert', 'Charge et ressenti cohérents : suis le plan prévu.'],
+    warn: ['À surveiller', 'Garde les footings vraiment faciles et ne rallonge pas ta sortie longue cette semaine.'],
+    alert: ['Lève le pied', 'Plusieurs signaux de fatigue ou une hausse brutale de charge : remplace la prochaine séance de qualité par un footing facile ou un jour de repos. Si une douleur persiste, consulte.'],
+  }[level];
+  const lvPill = { ok: '<span class="pill ok">OK</span>', warn: '<span class="pill warn">Attention</span>', alert: '<span class="pill acc">Alerte</span>', none: '<span class="pill">–</span>' };
+  return `<section class="status lv-${level}"><p class="eyebrow">État du jour</p><div class="big">${HEAD[0]}</div><p>${HEAD[1]}</p></section>
+    <div class="row"><button class="btn ${A.today ? '' : 'primary'}" data-act="well">${A.today ? 'Modifier mon ressenti du jour' : 'Noter mon ressenti du jour'}</button></div>
+    <section class="card">${sig.map(x => `<div class="signal"><b>${esc(x.name)}</b><span class="val">${esc(x.val)} ${lvPill[x.lv]}</span><p>${esc(x.text)}</p></div>`).join('')}</section>
+    ${A.series.length >= 14 ? `<section class="card col" style="gap:10px"><div class="spread"><h3>Condition et fatigue</h3><div class="legend"><span><i style="background:var(--ink)"></i>Condition</span><span><i style="background:var(--accent)"></i>Fatigue</span></div></div>${formeChart(A.series)}<p class="small muted">Charge de chaque sortie = effort ressenti × durée en minutes. Condition = moyenne lissée sur ~42 jours, fatigue = sur ~7 jours.</p></section>` : ''}
+    <details class="card"><summary style="cursor:pointer;font-weight:600">Sur quoi reposent ces indicateurs</summary>
+      <div class="col" style="gap:10px;margin-top:12px">
+      <p class="small">Ce sont des repères pour décider, pas un diagnostic. Aucun indicateur ne prédit une blessure de façon fiable ; leur intérêt est de repérer tôt les écarts par rapport à tes habitudes.</p>
+      <ul class="src col" style="gap:8px;padding-left:18px;margin:0">
+        <li><b>Pic de distance</b> : étude sur 5 205 coureurs suivis 18 mois. Une sortie dépassant de plus de 10 % la plus longue des 30 jours précédents augmentait le risque de blessure ; les hausses hebdomadaires globales, elles, n’y étaient pas clairement liées. <a href="https://blogs.bmj.com/bjsm/?p=11751" target="_blank" rel="noopener">Frandsen et al., BJSM 2025</a></li>
+        <li><b>Progression du kilométrage</b> : chez 874 débutants, plus de 30 % de hausse en deux semaines était associé à davantage de blessures liées à la distance (résultat exploratoire). La « règle des 10 % » seule n’a pas réduit les blessures dans un essai randomisé. <a href="https://vbn.aau.dk/da/publications/excessive-progression-in-weekly-running-distance-and-risk-of-runn" target="_blank" rel="noopener">Nielsen et al., JOSPT 2014</a> · <a href="https://research.rug.nl/en/publications/no-effect-of-a-graded-training-program-on-the-number-of-running-r/" target="_blank" rel="noopener">Buist et al., AJSM 2008</a></li>
+        <li><b>Charge, monotonie</b> : méthode de l’effort ressenti de séance × durée, et monotonie = moyenne ÷ écart-type de la charge quotidienne. <a href="https://sponet.de/sponet/Record/4001707" target="_blank" rel="noopener">Foster, MSSE 1998</a></li>
+        <li><b>Condition / fatigue</b> : inspiré du modèle forme-fatigue de Banister. Utile comme repère, mais le modèle reste simplificateur. <a href="https://rgu-repository.worktribe.com/OutputFile/1871154" target="_blank" rel="noopener">Swinton et al., 2021</a></li>
+        <li><b>Ressenti du jour</b> : sommeil, fatigue, stress, courbatures notés de 1 à 7. Les mesures subjectives réagissent mieux à la charge que la plupart des mesures objectives. <a href="https://coachsci.sdsu.edu/csa/vol13/hooper2.htm" target="_blank" rel="noopener">Hooper et al., MSSE 1995</a> · <a href="https://bjsm.bmj.com/content/50/5/281" target="_blank" rel="noopener">Saw et al., BJSM 2016</a></li>
+        <li><b>Pas de ratio aigu/chronique</b> : très répandu, mais critiqué pour des artefacts statistiques et un faible pouvoir prédictif, et sans lien clair avec les blessures chez les coureurs. <a href="https://opus.lib.uts.edu.au/handle/10453/145169" target="_blank" rel="noopener">Impellizzeri et al., Sports Med 2020</a></li>
+        <li><b>Organisation des séances</b> : la grande majorité du temps en endurance facile et au plus deux séances intenses par semaine, comme chez la plupart des coureurs d’endurance performants. <a href="https://www.frontiersin.org/articles/10.3389/fphys.2015.00295/full" target="_blank" rel="noopener">Stöggl & Sperlich, 2015</a> · <a href="https://link.springer.com/content/pdf/10.1007/s40279-024-02034-z.pdf" target="_blank" rel="noopener">Oliveira et al., Sports Med 2024</a></li>
+      </ul></div></details>`;
+}
+function sheetWell() {
+  const e = (S.wellness || []).find(x => x.date === TODAY) || {};
+  openSheet('Ressenti du jour', `<form id="wf">
+    <p class="small muted">Note-toi chaque matin, avant l’entraînement si possible. 1 = très bien, 7 = très mal.</p>
+    ${HOOPER.map(([k, lab, hint]) => `<fieldset><legend>${lab}</legend><div class="scale">${[1, 2, 3, 4, 5, 6, 7].map(v => `<label><input type="radio" name="wf-${k}" value="${v}" ${Number(e[k]) === v ? 'checked' : ''} aria-label="${lab} ${v}"><span>${v}</span></label>`).join('')}</div><p class="small muted">${hint}</p></fieldset>`).join('')}
+    <p class="err" id="wf-err" hidden></p>
+    <button class="btn primary block" type="submit">Enregistrer</button></form>`, el => {
+    $('#wf', el).onsubmit = async ev => {
+      ev.preventDefault();
+      const entry = { date: TODAY };
+      for (const [k] of HOOPER) { const c = $(`input[name=wf-${k}]:checked`, el); if (!c) { const er = $('#wf-err', el); er.hidden = false; er.textContent = 'Réponds aux quatre questions.'; return; } entry[k] = Number(c.value); }
+      if (await Store.saveWell(entry)) { closeSheet(); S.tab = 'forme'; toast('Ressenti enregistré'); schedule(); }
+    };
+  });
+}
 
 /* ---------- sheets ---------- */
 function defaultRace() { let d = F.addDays(TODAY, 70); while (F.parseD(d).getDay() !== 0) d = F.addDays(d, 1); return d; }
@@ -856,7 +1060,7 @@ const DAYLBL = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 const DAYNAME = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 function sheetSetup(preset) {
   const cur = S.profile || {};
-  const p = { goal: cur.goal || '10k', raceDate: cur.raceDate && cur.raceDate > TODAY ? cur.raceDate : defaultRace(), vma: cur.vma || 14, days: cur.days || [1, 3, 6] };
+  const p = { goal: cur.goal || '10k', raceDate: cur.raceDate && cur.raceDate > TODAY ? cur.raceDate : defaultRace(), vma: cur.vma || 14, days: cur.days || [1, 3, 6], vol: cur.vol || '20-30', volMax: cur.volMax || '30-40' };
   const mode = preset || cur.mode || 'race';
   const body = `<form id="setup">
     <div class="days" style="grid-template-columns:1fr 1fr" role="radiogroup" aria-label="Mode">
@@ -874,6 +1078,12 @@ function sheetSetup(preset) {
       <div class="grid3"><label class="field"><span>Distance</span><select id="su-ed"><option value="5">5 km</option><option value="10" selected>10 km</option><option value="21.0975">Semi</option></select></label>
       <label class="field"><span>Chrono</span><input id="su-et" placeholder="48:30" inputmode="numeric"></label>
       <div class="field"><span>&nbsp;</span><button type="button" class="btn" id="su-calc">Calculer</button></div></div></div></details>
+    <fieldset><legend>Kilométrage par semaine</legend>
+      <div class="grid2">
+        <label class="field"><span>Volume actuel</span><select id="su-vol">${F.BRACKETS.map(b => `<option value="${b.id}" ${b.id === p.vol ? 'selected' : ''}>${b.label}</option>`).join('')}</select></label>
+        <label class="field"><span>Maximum à ne pas dépasser</span><select id="su-volmax">${F.BRACKETS.map(b => `<option value="${b.id}" ${b.id === p.volMax ? 'selected' : ''}>${b.label}</option>`).join('')}</select></label>
+      </div>
+      <p class="small muted">Le plan part de ton volume actuel, monte d’au plus 8 % par semaine jusqu’au maximum, et prévoit une semaine plus légère toutes les 4 semaines. La sortie longue n’augmente jamais de plus de 10 % par rapport aux semaines précédentes.</p></fieldset>
     <fieldset><legend>Jours d’entraînement</legend><div class="days">${DAYLBL.map((l, i) => `<label title="${DAYNAME[i]}"><input type="checkbox" value="${i}" ${(p.days || []).map(Number).includes(i) ? 'checked' : ''} aria-label="${DAYNAME[i]}"><span>${l}</span></label>`).join('')}</div>
       <p class="small muted">Le dernier jour coché accueille la sortie longue, le premier la séance de qualité.</p></fieldset>
     <div class="preview" id="su-prev"></div>
@@ -883,7 +1093,7 @@ function sheetSetup(preset) {
   </form>`;
   openSheet(S.profile ? 'Mon programme' : 'Créer mon plan', body, el => {
     const getMode = () => $('input[name=su-mode]:checked', el).value;
-    const read = () => ({ mode: getMode(), goal: $('#su-goal', el).value, raceDate: $('#su-date', el).value, vma: num($('#su-vma', el).value), days: $$('.days input[type=checkbox]:checked', el).map(i => Number(i.value)) });
+    const read = () => ({ mode: getMode(), goal: $('#su-goal', el).value, raceDate: $('#su-date', el).value, vma: num($('#su-vma', el).value), days: $$('.days input[type=checkbox]:checked', el).map(i => Number(i.value)), vol: $('#su-vol', el).value, volMax: $('#su-volmax', el).value });
     let last = null;
     const prev = () => {
       const q = read(), free = q.mode === 'free';
@@ -893,14 +1103,20 @@ function sheetSetup(preset) {
         : 'Plan construit jusqu’au jour J (16 semaines maximum), avec affûtage la dernière semaine.';
       $('#su-submit', el).textContent = free ? 'Lancer le mode entretien' : 'Enregistrer ce plan';
       const firstMon = F.mondayOf(F.addDays(TODAY, 1));
-      const r = free ? { ...F.genFree(q, TODAY, firstMon, 0, 6), firstMon, weeks: 6 } : F.genPlan(q, TODAY);
+      const opts = { longest30: longest30() };
+      const r = free ? { ...F.genFree(q, TODAY, firstMon, 0, 6, opts), firstMon, weeks: 6 } : F.genPlan(q, TODAY, opts);
       last = r;
       const box = $('#su-prev', el);
       if (r.error || !(q.vma >= 8 && q.vma <= 25)) { box.innerHTML = `<p class="err">${esc(r.error || 'Indique une VMA entre 8 et 25 km/h.')}</p>`; return; }
       const c = { vma: q.vma, goal: free ? '10k' : q.goal };
       const km = r.workouts.reduce((a, w) => a + F.wTD(w, c).d / 1000, 0);
       const firstQ = r.workouts.find(w => w.type === 'frac');
-      box.innerHTML = `<div class="spread"><b class="num">${free ? `Cycle de 4 semaines · ${q.days.length} séances/sem.` : `${r.weeks} semaines · ${r.workouts.length} séances`}</b><span class="small muted num">≈ ${F.fmtKm(km / r.weeks, 0)} km/sem.</span></div>
+      const tv = Object.values(r.targets || {});
+      const longs = r.workouts.filter(w => w.type === 'sl').map(w => F.wTD(w, c).d / 1000);
+      const easy = Math.round((1 - F.hardShare(r.workouts, c)) * 100);
+      box.innerHTML = `<div class="spread"><b class="num">${free ? `Cycles de 4 semaines · ${q.days.length} séances/sem.` : `${r.weeks} semaines · ${r.workouts.length} séances`}</b></div>
+        ${tv.length ? `<div class="small num">Volume : <b>${tv[0]} km</b> la 1re semaine → <b>${Math.max(...tv)} km</b> au plus haut${longs.length ? ` · sortie longue ${F.fmtKm(Math.min(...longs))} → ${F.fmtKm(Math.max(...longs))} km` : ''}</div>` : ''}
+        <div class="small num">${easy} % du temps de course en endurance facile, ${q.days.length >= 4 ? '2 séances de qualité' : '1 séance de qualité'} par semaine.</div>
         <div class="small muted num">EF ${F.fmtPace(F.paceRange('ef', c)[0])}–${F.fmtPace(F.paceRange('ef', c)[1])} · Seuil ${F.fmtPace(F.paceRange('seuil', c)[0])}–${F.fmtPace(F.paceRange('seuil', c)[1])} · ${F.zoneLabel('as', c.goal)} ${F.fmtPace(F.paceMid('as', c))} · VMA ${F.fmtPace(F.paceRange('vma', c)[0])} /km</div>
         ${firstQ ? `<div class="small">Première séance de qualité : <b>${esc(F.notation(firstQ, c))}</b></div>` : ''}`;
     };
@@ -922,8 +1138,8 @@ function sheetSetup(preset) {
       const free = q.mode === 'free';
       const profile = { ...q, updated: new Date().toISOString() };
       if (free) { profile.goal = S.profile?.goal || q.goal; profile.raceDate = null; }
-      const plan = free ? { mode: 'free', firstMon: last.firstMon, genWeeks: 6, workouts: keep.concat(last.workouts) }
-                        : { mode: 'race', firstMon: last.firstMon, weeks: last.weeks, workouts: keep.concat(last.workouts) };
+      const plan = free ? { mode: 'free', firstMon: last.firstMon, genWeeks: 6, targets: last.targets, workouts: keep.concat(last.workouts) }
+                        : { mode: 'race', firstMon: last.firstMon, weeks: last.weeks, targets: last.targets, workouts: keep.concat(last.workouts) };
       const ok = await Store.saveProfile(profile) && await Store.savePlan(plan);
       if (ok) { closeSheet(); S.tab = 'plan'; toast(free ? 'Mode entretien lancé' : 'Plan enregistré'); schedule(); }
     };
@@ -935,9 +1151,9 @@ async function extendFree() {
   const cur = Math.floor(F.daysBetween(S.plan.firstMon, F.mondayOf(TODAY)) / 7);
   const target = cur + 6, from = Math.max(S.plan.genWeeks || 0, cur);
   if (from >= target) return;
-  const r = F.genFree(S.profile, TODAY, S.plan.firstMon, from, target - from);
+  const r = F.genFree({ vol: '20-30', volMax: '30-40', ...S.profile }, TODAY, S.plan.firstMon, from, target - from, { longest30: longest30() });
   if (r.error) return;
-  await Store.savePlan({ ...S.plan, genWeeks: target, workouts: (S.plan.workouts || []).concat(r.workouts) });
+  await Store.savePlan({ ...S.plan, genWeeks: target, targets: { ...(S.plan.targets || {}), ...r.targets }, workouts: (S.plan.workouts || []).concat(r.workouts) });
 }
 function stepsHtml(w) {
   const c = ctx();
@@ -1103,7 +1319,7 @@ function sheetRun(run, forW) {
     <div class="grid3"><label class="field"><span>Durée</span><input id="rf-dur" inputmode="numeric" value="${r.dur ? hms(r.dur) : ''}" placeholder="52:30"></label>
     <label class="field"><span>FC moy.</span><input id="rf-hr" type="number" inputmode="numeric" min="60" max="230" value="${r.hr ?? ''}"></label>
     <label class="field"><span>D+ (m)</span><input id="rf-dp" type="number" inputmode="numeric" min="0" value="${r.dplus ?? ''}"></label></div>
-    <label class="field"><span>Ressenti : <b id="rf-rpev">${r.rpe || 5}</b>/10 (1 très facile, 10 épuisé)</span><input id="rf-rpe" type="range" min="1" max="10" value="${r.rpe || 5}"></label>
+    <label class="field"><span>Effort ressenti de la séance : <b id="rf-rpev">${r.rpe || 5}</b>/10 (1 très facile, 10 maximal). À noter environ 30 min après.</span><input id="rf-rpe" type="range" min="1" max="10" value="${r.rpe || 5}"></label>
     <label class="field"><span>Notes</span><textarea id="rf-notes" placeholder="Météo, sensations, douleurs…">${esc(r.notes || '')}</textarea></label>
     <p class="small muted num" id="rf-pace"></p>
     <p class="err" id="rf-err" hidden></p>
