@@ -651,8 +651,8 @@ const Store = {
     try { this.apply(JSON.parse(localStorage.getItem(LS) || '{}')); }
     catch (e) { S.note = 'Impossible de lire les données enregistrées sur ce téléphone.'; }
   },
-  apply(d) { S.profile = d.profile || null; S.plan = d.plan || null; S.runs = d.runs || []; S.routes = d.routes || []; S.wellness = d.wellness || []; S.lastBackup = d.lastBackup || null; },
-  dump() { return { app: 'foulee', version: 1, savedAt: new Date().toISOString(), profile: S.profile, plan: S.plan, runs: S.runs, routes: S.routes, wellness: S.wellness || [], lastBackup: S.lastBackup || null }; },
+  apply(d) { S.profile = d.profile || null; S.plan = d.plan || null; S.runs = d.runs || []; S.routes = d.routes || []; S.wellness = d.wellness || []; S.others = d.others || []; S.lastBackup = d.lastBackup || null; },
+  dump() { return { app: 'foulee', version: 1, savedAt: new Date().toISOString(), profile: S.profile, plan: S.plan, runs: S.runs, routes: S.routes, wellness: S.wellness || [], others: S.others || [], lastBackup: S.lastBackup || null }; },
   saveLocal() {
     try { localStorage.setItem(LS, JSON.stringify(this.dump())); }
     catch (e) { toast("Le téléphone a refusé l'enregistrement (stockage plein ou bloqué)."); schedule(); return false; }
@@ -665,6 +665,8 @@ const Store = {
   delRun(id) { return this.run(() => { S.runs = S.runs.filter(x => x.id !== id); }); },
   saveRoute(r) { return this.run(() => { S.routes = S.routes.filter(x => x.id !== r.id).concat(r); }); },
   delRoute(id) { return this.run(() => { S.routes = S.routes.filter(x => x.id !== id); }); },
+  saveOther(o) { return this.run(() => { S.others = (S.others || []).filter(x => x.id !== o.id).concat(o); }); },
+  delOther(id) { return this.run(() => { S.others = (S.others || []).filter(x => x.id !== id); }); },
   saveWell(e) { return this.run(() => { S.wellness = (S.wellness || []).filter(x => x.date !== e.date).concat(e); }); },
 };
 async function saveWorkout(w) {
@@ -729,7 +731,7 @@ function sessRow(w, opts = {}) {
   const z = F.mainZone(w);
   const done = isDone(w), missed = !done && w.date < TODAY;
   const e = est(w);
-  const status = done ? `<span class="pill ok">Faite</span>` : missed ? `<span class="pill">Non faite</span>` : `<span class="num">${F.fmtKm(e.km)} km</span>`;
+  const status = done ? `<span class="pill ok">Faite</span>` : missed ? `<span class="pill">Non faite</span>` : !opts.example && adaptFor(w) ? `<span class="pill warn">À adapter</span>` : `<span class="num">${F.fmtKm(e.km)} km</span>`;
   const d = F.parseD(w.date);
   return `<button class="sess ${w.date === TODAY ? 'today' : ''} ${done ? 'done' : ''} ${missed ? 'missed' : ''} ${opts.example ? 'example' : ''}" ${opts.example ? 'tabindex="-1" aria-disabled="true"' : `data-open="${w.id}"`} style="--zc:${zc(z)}">
     <span class="d"><small>${fmtDay(w.date, { weekday: 'short' }).replace('.', '')}</small><strong class="num">${d.getDate()}</strong></span>
@@ -855,7 +857,8 @@ function viewJournal() {
       <div class="kpi"><span class="v num">${s.time ? F.fmtDurRound(s.time) : '0\''}</span><span class="l">Temps de course</span></div>
     </div></section>
     <section class="card col" style="gap:10px"><div class="spread"><h3>Volume hebdomadaire</h3><div class="legend"><span><i style="background:var(--ink)"></i>Réalisé</span><span><i style="border:1.2px dashed var(--muted)"></i>Prévu</span></div></div>${chart()}</section>
-    <div class="row"><button class="btn primary" data-act="add-run">+ Ajouter une sortie</button></div>`;
+    <div class="row"><button class="btn primary" data-act="add-run">+ Ajouter une sortie</button><button class="btn" data-act="add-other">+ Autre sport</button>${ICU.key ? '<button class="btn ghost" data-act="import">Importer depuis Garmin</button>' : ''}</div>
+    ${(() => { const os = (S.others || []).filter(o => o.date >= F.addDays(TODAY, -27)).sort((a, b) => b.date.localeCompare(a.date)); return os.length ? `<section class="col" style="gap:8px"><p class="eyebrow">Autres sports · 4 dernières semaines</p>${os.map(o => `<button class="run" data-other="${o.id}" style="flex-direction:row;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px"><span><b>${esc(sportLabel(o.sport))}</b> <span class="muted small">· ${esc(fmtDay(o.date))}</span></span><span class="row" style="gap:6px;flex-wrap:nowrap"><span class="num small">${F.fmtDurRound(Number(o.dur) || 0)}</span>${o.rpe ? `<span class="pill">${o.rpe}/10</span>` : sportKind(o.sport) ? '<span class="pill warn">Effort ?</span>' : `<span class="pill">≈${sportRpe(o.sport)}/10</span>`}</span></button>`).join('')}</section>` : ''; })()}`;
   if (!runs.length) {
     html += `<section class="empty"><h3>Aucune sortie pour l’instant</h3><p class="muted">Après chaque course, ajoute ta sortie à la main ou importe le fichier GPX/TCX exporté depuis Garmin Connect (activité → roue dentée → Exporter). Foulée la compare à la séance prévue : volume, allure, ressenti.</p></section>`;
     return html;
@@ -864,7 +867,7 @@ function viewJournal() {
     const w = (S.plan?.workouts || []).find(x => x.id === r.wid);
     const pace = r.dist && r.dur ? F.fmtPace(r.dur / r.dist) : '–';
     return `<button class="run" data-run="${r.id}">
-      <div class="spread"><b>${esc(fmtDay(r.date, { weekday: 'long', day: 'numeric', month: 'long' }))}</b>${r.rpe ? `<span class="pill">Ressenti ${esc(r.rpe)}/10</span>` : ''}</div>
+      <div class="spread"><b>${esc(fmtDay(r.date, { weekday: 'long', day: 'numeric', month: 'long' }))}</b>${r.rpe ? `<span class="pill">Ressenti ${esc(r.rpe)}/10</span>` : r.src === 'icu' ? '<span class="pill warn">Effort à noter</span>' : ''}</div>
       ${w ? `<span class="muted small">Prévu : ${esc(F.notation(w, ctx()))}</span>` : `<span class="muted small">Sortie libre</span>`}
       <div class="metrics"><div><b>${r.dist ? F.fmtKm(Number(r.dist), 2) : '–'}</b><span>km</span></div><div><b>${r.dur ? hms(r.dur) : '–'}</b><span>durée</span></div><div><b>${pace}</b><span>/km</span></div><div><b>${r.hr || '–'}</b><span>FC moy</span></div></div>
       ${(() => { const j = judge(r); return j.length ? `<div class="row" style="gap:6px">${j.join('')}</div>` : ''; })()}
@@ -911,16 +914,115 @@ function matchRoutes(w) {
 function bindView(v) {
   $$('[data-open]', v).forEach(b => b.onclick = () => sheetWorkout(b.dataset.open));
   $$('[data-run]', v).forEach(b => b.onclick = () => sheetRun(S.runs.find(r => r.id === b.dataset.run)));
+  $$('[data-other]', v).forEach(b => b.onclick = () => sheetOther((S.others || []).find(o => o.id === b.dataset.other)));
   $$('[data-route]', v).forEach(b => b.onclick = () => sheetRoute(S.routes.find(r => r.id === b.dataset.route)));
   $$('[data-sync]', v).forEach(b => b.onclick = () => autoSync(true));
   $$('[data-export-week]', v).forEach(b => b.onclick = () => {
     const mon = b.dataset.exportWeek, sun = F.addDays(mon, 6);
     exportGarmin(workouts().filter(w => w.date >= mon && w.date <= sun && w.date >= TODAY && !isDone(w)), `semaine-${mon}`);
   });
-  $$('[data-act]', v).forEach(b => b.onclick = () => ({ setup: () => sheetSetup(), race: () => sheetSetup('race'), free: () => sheetSetup('free'), 'add-w': () => sheetEdit(null), 'add-run': () => sheetRun(null), 'add-route': () => sheetRoute(null), backup: sheetSettings, well: sheetWell })[b.dataset.act]());
+  $$('[data-act]', v).forEach(b => b.onclick = () => ({ setup: () => sheetSetup(), race: () => sheetSetup('race'), free: () => sheetSetup('free'), 'add-w': () => sheetEdit(null), 'add-run': () => sheetRun(null), 'add-route': () => sheetRoute(null), backup: sheetSettings, well: sheetWell, 'add-other': () => sheetOther(null), import: () => icuImport(true) })[b.dataset.act]());
 }
 $$('.tab').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; render(); window.scrollTo(0, 0); });
 
+
+
+/* ---------- other sports ---------- */
+const SPORTS = {
+  Ride: ['Vélo', 4, 'legs'], VirtualRide: ['Vélo d’intérieur', 5, 'legs'], MountainBikeRide: ['VTT', 5, 'legs'], GravelRide: ['Gravel', 4, 'legs'], EBikeRide: ['Vélo électrique', 2, ''],
+  Walk: ['Marche', 2, ''], Hike: ['Randonnée', 3, 'legs'], Swim: ['Natation', 4, ''], WeightTraining: ['Musculation', 5, 'strength'], Workout: ['Renforcement', 5, 'strength'],
+  Crossfit: ['CrossFit', 7, 'strength'], HighIntensityIntervalTraining: ['HIIT', 7, 'legs'], Yoga: ['Yoga', 2, ''], Pilates: ['Pilates', 3, ''], Rowing: ['Aviron', 5, 'legs'],
+  Soccer: ['Football', 6, 'legs'], Tennis: ['Tennis', 5, 'legs'], Badminton: ['Badminton', 5, 'legs'], Squash: ['Squash', 6, 'legs'], Elliptical: ['Elliptique', 4, 'legs'],
+  StairStepper: ['Stepper', 5, 'legs'], NordicSki: ['Ski de fond', 5, 'legs'], AlpineSki: ['Ski alpin', 4, 'legs'], RockClimbing: ['Escalade', 5, ''], Other: ['Autre activité', 4, ''],
+};
+const RUN_TYPES = ['Run', 'TrailRun', 'VirtualRun'];
+const sportLabel = t => (SPORTS[t] || [t || 'Activité'])[0];
+const sportRpe = t => (SPORTS[t] || [0, 4])[1];
+const sportKind = t => (SPORTS[t] || [0, 0, ''])[2];
+// session-RPE load (Foster): effort (1-10) × minutes; a sport default is used until the effort is noted
+const runLoad = r => (Number(r.rpe) || 5) * (Number(r.dur) || 0) / 60;
+const otherLoad = o => (Number(o.rpe) || sportRpe(o.sport)) * (Number(o.dur) || 0) / 60;
+// Was a demanding non-running session done shortly before this quality run / long run?
+function adaptFor(w) {
+  if (!['frac', 'test', 'sl'].includes(w.type) || isDone(w) || w.date < TODAY || w.date > F.addDays(TODAY, 1)) return null;
+  const cands = (S.others || []).filter(o => {
+    const kind = sportKind(o.sport); if (!kind) return false;
+    const gap = F.daysBetween(o.date, w.date);
+    const window = kind === 'strength' ? 2 : 1;
+    if (gap < 0 || gap > window) return false;
+    const rpe = Number(o.rpe) || sportRpe(o.sport);
+    return otherLoad(o) >= 240 || rpe >= 7 || (kind === 'strength' && rpe >= 6);
+  }).sort((a, b) => otherLoad(b) - otherLoad(a));
+  if (!cands.length) return null;
+  const o = cands[0];
+  let moveTo = null;
+  for (let i = 1; i <= 3 && !moveTo; i++) {
+    const d = F.addDays(w.date, i);
+    if (!(S.plan?.workouts || []).some(x => x.date === d) && !(S.plan?.workouts || []).some(x => x.date === F.addDays(d, 1) && ['frac', 'test', 'sl', 'course'].includes(x.type))) moveTo = d;
+  }
+  const when = o.date === w.date ? 'aujourd’hui' : o.date === F.addDays(w.date, -1) ? 'la veille' : 'il y a deux jours';
+  return { o, moveTo, text: `${sportLabel(o.sport)} ${when} : ${F.fmtDurRound(Number(o.dur) || 0)}${o.rpe ? `, effort ${o.rpe}/10` : ''}. ${sportKind(o.sport) === 'strength' ? 'La fatigue d’une séance de renforcement peut durer plusieurs jours et peser sur une séance intense.' : 'Tes jambes ont déjà travaillé dur : la qualité de cette séance risque d’en pâtir.'}` };
+}
+
+/* ---------- import from Intervals.icu (activities synced from Garmin) ---------- */
+async function icuImport(loud) {
+  if (!ICU.key) return;
+  let acts;
+  try { acts = await icuCall(`/athlete/0/activities?oldest=${F.addDays(TODAY, -60)}&newest=${TODAY}`); }
+  catch (e) { ICU.impErr = e.msg; icuSave(); if (loud) toast(e.msg); return; }
+  if (!Array.isArray(acts)) return;
+  let nRun = 0, nOther = 0;
+  const runs = S.runs.slice(), others = (S.others || []).slice();
+  for (const a of acts) {
+    if (!a || !a.id || !a.start_date_local) continue;
+    const date = String(a.start_date_local).slice(0, 10);
+    const dur = Number(a.moving_time || a.elapsed_time) || 0;
+    const rpeRaw = Number(a.icu_rpe ?? a.perceived_exertion);
+    const rpe = rpeRaw >= 1 && rpeRaw <= 10 ? Math.round(rpeRaw) : null;
+    const hr = Math.round(Number(a.average_heartrate)) || null;
+    if (RUN_TYPES.includes(a.type)) {
+      const dist = Math.round((Number(a.distance) || 0) / 10) / 100;
+      let r = runs.find(x => x.icuId === a.id);
+      if (!r) r = runs.find(x => !x.icuId && x.date === date && x.dist && dist && Math.abs(x.dist - dist) / dist < 0.15);
+      if (r) { Object.assign(r, { icuId: a.id, hr: r.hr || hr, dplus: r.dplus || Math.round(Number(a.total_elevation_gain) || 0), rpe: r.rpe || rpe }); continue; }
+      const planned = workouts().find(w => w.date === date && !isDone(w) && !runs.some(x => x.wid === w.id));
+      runs.push({ id: 'icu-' + a.id, icuId: a.id, date, dist, dur, hr, dplus: Math.round(Number(a.total_elevation_gain) || 0), rpe, wid: planned?.id || null, notes: '', src: 'icu' });
+      nRun++;
+    } else {
+      const o = others.find(x => x.icuId === a.id);
+      if (o) { Object.assign(o, { dur, hr, rpe: o.rpe || rpe }); continue; }
+      others.push({ id: 'icu-' + a.id, icuId: a.id, date, sport: a.type || 'Other', name: a.name || '', dur, hr, rpe, dist: Number(a.distance) || 0, src: 'icu' });
+      nOther++;
+    }
+  }
+  S.runs = runs; S.others = others; ICU.imp = new Date().toISOString(); ICU.impErr = null; icuSave(); Store.saveLocal();
+  if (loud) toast(nRun || nOther ? `${nRun} course${nRun > 1 ? 's' : ''} et ${nOther} autre${nOther > 1 ? 's' : ''} activité${nOther > 1 ? 's' : ''} importée${nRun + nOther > 1 ? 's' : ''}` : 'Rien de nouveau à importer');
+}
+function sheetOther(o) {
+  const isNew = !o;
+  const x = o || { id: F.uid('o'), date: TODAY, sport: 'WeightTraining', dur: 3600, rpe: null, src: 'manual' };
+  openSheet(isNew ? 'Autre activité' : sportLabel(x.sport), `<form id="of">
+    ${x.src === 'icu' ? `<p class="small muted">Importée depuis Garmin via Intervals.icu${x.name ? ` : « ${esc(x.name)} »` : ''}.</p>` : ''}
+    <div class="grid2"><label class="field"><span>Sport</span><select id="of-sport" ${x.src === 'icu' ? 'disabled' : ''}>${Object.entries(SPORTS).map(([k, v]) => `<option value="${k}" ${k === x.sport ? 'selected' : ''}>${v[0]}</option>`).join('')}${SPORTS[x.sport] ? '' : `<option value="${esc(x.sport)}" selected>${esc(x.sport)}</option>`}</select></label>
+    <label class="field"><span>Date</span><input id="of-date" type="date" value="${esc(x.date)}" ${x.src === 'icu' ? 'disabled' : ''}></label></div>
+    <label class="field"><span>Durée</span><input id="of-dur" inputmode="numeric" value="${x.dur ? hms(x.dur) : ''}" placeholder="1:00:00" ${x.src === 'icu' ? 'disabled' : ''}></label>
+    <label class="field"><span>Effort ressenti : <b id="of-rpev">${x.rpe || sportRpe(x.sport)}</b>/10 ${x.rpe ? '' : '<span class="muted">(valeur par défaut, à ajuster)</span>'}</span><input id="of-rpe" type="range" min="1" max="10" value="${x.rpe || sportRpe(x.sport)}"></label>
+    <p class="small muted">L’effort compte dans ta fatigue globale (onglet Forme), mais pas dans tes kilomètres de course.</p>
+    <p class="err" id="of-err" hidden></p>
+    <button class="btn primary block" type="submit">Enregistrer</button>
+    ${isNew ? '' : '<button class="btn danger block" type="button" id="of-del">Supprimer</button>'}</form>`, el => {
+    $('#of-rpe', el).oninput = e => { $('#of-rpev', el).textContent = e.target.value; };
+    $('#of', el).onsubmit = async e => {
+      e.preventDefault();
+      const dur = x.src === 'icu' ? x.dur : parseDur($('#of-dur', el).value);
+      if (!dur) { const er = $('#of-err', el); er.hidden = false; er.textContent = 'Indique la durée (ex. 45:00 ou 1:00:00).'; return; }
+      const o2 = { ...x, sport: x.src === 'icu' ? x.sport : $('#of-sport', el).value, date: x.src === 'icu' ? x.date : $('#of-date', el).value, dur, rpe: Number($('#of-rpe', el).value) };
+      if (await Store.saveOther(o2)) { closeSheet(); toast('Activité enregistrée'); schedule(); }
+    };
+    const del = $('#of-del', el);
+    if (del) twoStep(del, 'Confirmer la suppression', async () => { if (await Store.delOther(x.id)) { closeSheet(); toast('Activité supprimée'); } });
+  });
+}
 
 /* ---------- Forme: fatigue & load indicators ---------- */
 // longest run in the 30 days before `ref` (exclusive)
@@ -932,14 +1034,19 @@ const HOOPER = [['sleep', 'Sommeil', '1 excellent · 7 très mauvais'], ['fatigu
 const hooperSum = e => HOOPER.reduce((a, [k]) => a + (Number(e[k]) || 0), 0);
 function analyse() {
   const runs = S.runs.filter(r => r.date <= TODAY).slice().sort((a, b) => a.date.localeCompare(b.date));
-  const load = r => (Number(r.rpe) || 5) * (Number(r.dur) || 0) / 60; // session-RPE (CR-10 × minutes)
+  // systemic load: running + other sports (session-RPE × minutes). Distance indicators stay running-only.
+  const others = (S.others || []).filter(o => o.date <= TODAY);
   const daily = new Map();
-  runs.forEach(r => daily.set(r.date, (daily.get(r.date) || 0) + load(r)));
-  const A = { n: runs.length, span: runs.length ? F.daysBetween(runs[0].date, TODAY) + 1 : 0 };
+  runs.forEach(r => daily.set(r.date, (daily.get(r.date) || 0) + runLoad(r)));
+  others.forEach(o => daily.set(o.date, (daily.get(o.date) || 0) + otherLoad(o)));
+  const firstDay = [...daily.keys()].sort()[0];
+  const A = { n: runs.length + others.length, span: firstDay ? F.daysBetween(firstDay, TODAY) + 1 : 0 };
+  const o7 = others.filter(o => o.date >= F.addDays(TODAY, -6));
+  A.other7 = { n: o7.length, dur: o7.reduce((t, o) => t + (Number(o.dur) || 0), 0), load: o7.reduce((t, o) => t + otherLoad(o), 0), unrated: o7.filter(o => !o.rpe && sportKind(o.sport)).length };
   let ctl = 0, atl = 0; const series = [];
-  if (runs.length) {
+  if (firstDay) {
     const kf = 1 - Math.exp(-1 / 42), ka = 1 - Math.exp(-1 / 7);
-    let d = F.addDays(TODAY, -364) > runs[0].date ? F.addDays(TODAY, -364) : runs[0].date;
+    let d = F.addDays(TODAY, -364) > firstDay ? F.addDays(TODAY, -364) : firstDay;
     for (; d <= TODAY; d = F.addDays(d, 1)) { const L = daily.get(d) || 0; ctl += (L - ctl) * kf; atl += (L - atl) * ka; series.push({ d, ctl, atl }); }
   }
   Object.assign(A, { ctl, atl, series: series.slice(-56) });
@@ -991,6 +1098,12 @@ function signals(A) {
     const m = A.monotony;
     out.push({ lv: m > 2 ? 'warn' : 'ok', name: 'Monotonie de la semaine', val: isFinite(m) ? F.fmtKm(m, 1) : 'max', text: `Charge moyenne divisée par sa variabilité sur 7 jours. Au-dessus de 2, les jours se ressemblent trop : alterne davantage jours durs, jours faciles et repos.` });
   }
+  if (A.other7.n) {
+    const runL = A.week - A.other7.load, share = A.week ? A.other7.load / A.week : 0;
+    out.push({ lv: 'ok', name: 'Autres sports (7 jours)', val: F.fmtDurRound(A.other7.dur), text: `${A.other7.n} activité${A.other7.n > 1 ? 's' : ''}, soit ${Math.round(share * 100)} % de ta charge de la semaine. Elles comptent dans ta fatigue, pas dans tes kilomètres de course.${A.other7.unrated ? ` ${A.other7.unrated} sans effort noté : un effort par défaut est utilisé, ajuste-le dans le Journal.` : ''}` });
+  }
+  const nextQ = workouts().find(w => w.date >= TODAY && w.date <= F.addDays(TODAY, 1) && adaptFor(w));
+  if (nextQ) { const ad = adaptFor(nextQ); out.unshift({ lv: 'warn', name: `Séance ${nextQ.date === TODAY ? 'du jour' : 'de demain'} à adapter`, val: '', text: ad.text + ' Ouvre-la dans le Plan pour la décaler ou l’alléger en un tap.' }); }
   if (A.today) {
     const sc = hooperSum(A.today), worst = Math.max(...HOOPER.map(([k]) => Number(A.today[k]) || 0));
     let lv = worst >= 6 ? 'warn' : 'ok', txt = `Total ${sc}/28 (plus c’est bas, mieux c’est).`;
@@ -1025,7 +1138,7 @@ function viewForme() {
   return `<section class="status lv-${level}"><p class="eyebrow">État du jour</p><div class="big">${HEAD[0]}</div><p>${HEAD[1]}</p></section>
     <div class="row"><button class="btn ${A.today ? '' : 'primary'}" data-act="well">${A.today ? 'Modifier mon ressenti du jour' : 'Noter mon ressenti du jour'}</button></div>
     <section class="card">${sig.map(x => `<div class="signal"><b>${esc(x.name)}</b><span class="val">${esc(x.val)} ${lvPill[x.lv]}</span><p>${esc(x.text)}</p></div>`).join('')}</section>
-    ${A.series.length >= 14 ? `<section class="card col" style="gap:10px"><div class="spread"><h3>Condition et fatigue</h3><div class="legend"><span><i style="background:var(--ink)"></i>Condition</span><span><i style="background:var(--accent)"></i>Fatigue</span></div></div>${formeChart(A.series)}<p class="small muted">Charge de chaque sortie = effort ressenti × durée en minutes. Condition = moyenne lissée sur ~42 jours, fatigue = sur ~7 jours.</p></section>` : ''}
+    ${A.series.length >= 14 ? `<section class="card col" style="gap:10px"><div class="spread"><h3>Condition et fatigue</h3><div class="legend"><span><i style="background:var(--ink)"></i>Condition</span><span><i style="background:var(--accent)"></i>Fatigue</span></div></div>${formeChart(A.series)}<p class="small muted">Charge de chaque séance (course et autres sports) = effort ressenti × durée en minutes. Condition = moyenne lissée sur ~42 jours, fatigue = sur ~7 jours.</p></section>` : ''}
     <details class="card"><summary style="cursor:pointer;font-weight:600">Sur quoi reposent ces indicateurs</summary>
       <div class="col" style="gap:10px;margin-top:12px">
       <p class="small">Ce sont des repères pour décider, pas un diagnostic. Aucun indicateur ne prédit une blessure de façon fiable ; leur intérêt est de repérer tôt les écarts par rapport à tes habitudes.</p>
@@ -1035,6 +1148,7 @@ function viewForme() {
         <li><b>Charge, monotonie</b> : méthode de l’effort ressenti de séance × durée, et monotonie = moyenne ÷ écart-type de la charge quotidienne. <a href="https://sponet.de/sponet/Record/4001707" target="_blank" rel="noopener">Foster, MSSE 1998</a></li>
         <li><b>Condition / fatigue</b> : inspiré du modèle forme-fatigue de Banister. Utile comme repère, mais le modèle reste simplificateur. <a href="https://rgu-repository.worktribe.com/OutputFile/1871154" target="_blank" rel="noopener">Swinton et al., 2021</a></li>
         <li><b>Ressenti du jour</b> : sommeil, fatigue, stress, courbatures notés de 1 à 7. Les mesures subjectives réagissent mieux à la charge que la plupart des mesures objectives. <a href="https://coachsci.sdsu.edu/csa/vol13/hooper2.htm" target="_blank" rel="noopener">Hooper et al., MSSE 1995</a> · <a href="https://bjsm.bmj.com/content/50/5/281" target="_blank" rel="noopener">Saw et al., BJSM 2016</a></li>
+        <li><b>Autres sports</b> : la charge de séance (effort × durée) s’applique à tous les sports, d’où leur prise en compte dans la fatigue. Les indicateurs de distance restent propres à la course, car le risque de blessure lié aux kilomètres est spécifique à l’impact de la course. Une séance de renforcement peut laisser une fatigue de plusieurs jours qui gêne l’endurance. <a href="https://www.sciencedaily.com/releases/2017/07/170726103003.htm" target="_blank" rel="noopener">Doma et al., Sports Med 2017</a></li>
         <li><b>Pas de ratio aigu/chronique</b> : très répandu, mais critiqué pour des artefacts statistiques et un faible pouvoir prédictif, et sans lien clair avec les blessures chez les coureurs. <a href="https://opus.lib.uts.edu.au/handle/10453/145169" target="_blank" rel="noopener">Impellizzeri et al., Sports Med 2020</a></li>
         <li><b>Organisation des séances</b> : la grande majorité du temps en endurance facile et au plus deux séances intenses par semaine, comme chez la plupart des coureurs d’endurance performants. <a href="https://www.frontiersin.org/articles/10.3389/fphys.2015.00295/full" target="_blank" rel="noopener">Stöggl & Sperlich, 2015</a> · <a href="https://link.springer.com/content/pdf/10.1007/s40279-024-02034-z.pdf" target="_blank" rel="noopener">Oliveira et al., Sports Med 2024</a></li>
       </ul></div></details>`;
@@ -1175,6 +1289,8 @@ function sheetWorkout(id) {
     <div style="font:600 28px/1.05 var(--f-display)">${esc(F.notation(w, ctx()))}</div>
     ${strip(w)}
     <div class="row"><span class="pill z num" style="--zc:${zc(z)}">${esc(F.zoneLabel(z, ctx().goal))}</span><span class="pill num">${e.label}</span>${run ? '<span class="pill ok">Faite</span>' : ''}</div>
+    ${(() => { const ad = adaptFor(w); return ad ? `<section class="status lv-warn"><p class="eyebrow">Adaptation conseillée</p><p>${esc(ad.text)}</p>
+      <div class="row">${ad.moveTo ? `<button class="btn primary" id="sw-move">Décaler à ${esc(fmtDay(ad.moveTo, { weekday: 'long' }))}</button>` : ''}<button class="btn" id="sw-easy">Remplacer par un footing facile</button></div></section>` : ''; })()}
     ${w.notes ? `<p class="muted">${esc(w.notes)}</p>` : ''}
     ${stepsHtml(w)}
     <div class="row">${run ? `<button class="btn" id="sw-run">Voir le résultat</button>` : `<button class="btn primary" id="sw-run">Saisir le résultat</button>`}<button class="btn" id="sw-icu">${ICU.key ? (icuSynced(w) ? 'Renvoyer à Intervals.icu' : 'Envoyer à Intervals.icu') : 'Envoyer vers ma montre'}</button><button class="btn" id="sw-fit">Fichier Garmin (.fit)</button></div>
@@ -1190,6 +1306,12 @@ function sheetWorkout(id) {
   openSheet(TYPES[w.type]?.short || 'Séance', body, el => {
     $('#sw-run', el).onclick = () => sheetRun(run || null, w);
     $('#sw-fit', el).onclick = () => exportGarmin([w], w.date);
+    const ad = adaptFor(w);
+    if (ad) {
+      const mv = $('#sw-move', el);
+      if (mv) mv.onclick = async () => { if (await saveWorkout({ ...w, date: ad.moveTo, auto: false, notes: [w.notes, `Décalée après : ${sportLabel(ad.o.sport)}.`].filter(Boolean).join(' ') })) { toast('Séance décalée'); sheetWorkout(w.id); } };
+      $('#sw-easy', el).onclick = async () => { const min = Math.max(30, Math.min(50, Math.round(est(w).t / 60 / 5) * 5)); if (await saveWorkout({ ...w, type: 'ef', steps: F.cont(min), auto: false, notes: `Allégée après : ${sportLabel(ad.o.sport)}.` })) { toast('Séance allégée'); sheetWorkout(w.id); } };
+    }
     $('#sw-icu', el).onclick = async () => { if (!ICU.key) { sheetIcu(); return; } const b = $('#sw-icu', el); b.disabled = true; b.textContent = 'Envoi…'; const ok = await icuPush([w], true); if (ok) toast('Séance envoyée à Intervals.icu'); sheetWorkout(w.id); };
     $('#sw-edit', el).onclick = () => sheetEdit(w);
     twoStep($('#sw-del', el), 'Confirmer la suppression', async () => { if (await deleteWorkout(w.id)) { closeSheet(); toast('Séance supprimée'); } });
@@ -1499,11 +1621,14 @@ function sheetIcu() {
     <label class="check"><input type="checkbox" id="icu-auto" ${ICU.auto !== false ? 'checked' : ''}> Envoyer automatiquement les séances des 4 prochaines semaines</label>
     <p class="small muted">À chaque ouverture de Foulée et à chaque changement du plan. Intervals.icu transmet ensuite à Garmin Connect les séances des 7 prochains jours, et l’appli Connect les met sur ta montre.</p>
     <button class="btn primary block" id="icu-now">Envoyer maintenant</button>
+    <div class="card col" style="gap:6px"><b>Récupération de tes activités</b><p class="small muted">Courses et autres sports enregistrés par ta montre sont importés à chaque ouverture : les courses remplissent ton Journal, les autres sports comptent dans ta fatigue. Il faut que Intervals.icu récupère tes activités Garmin (Settings › Garmin Connect › Download activities).</p>
+      <p class="small">${ICU.impErr ? esc(ICU.impErr) : ICU.imp ? `Dernier import : ${esc(new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(ICU.imp)))}` : 'Pas encore d’import.'}</p>
+      <button class="btn" id="icu-imp">Importer maintenant</button></div>
     <button class="btn danger block" id="icu-off">Déconnecter</button>` : `
     <p>Une seule fois, relie Foulée à Intervals.icu (gratuit). Ensuite tes séances partent toutes seules vers ta Venu 2S.</p>
     <ol class="ol">
       <li>Crée un compte sur <a href="https://intervals.icu/" target="_blank" rel="noopener">intervals.icu</a>.</li>
-      <li>Dans ses <b>Settings</b>, section Garmin Connect : connecte ton compte Garmin et active l’envoi des séances planifiées (<b>Upload planned workouts</b>).</li>
+      <li>Dans ses <b>Settings</b>, section Garmin Connect : connecte ton compte Garmin, active l’envoi des séances planifiées (<b>Upload planned workouts</b>) et la récupération des activités (<b>Download activities</b>).</li>
       <li>Toujours dans Settings, section <b>Developer Settings</b> : génère une <b>API key</b> et copie-la.</li>
       <li>Colle-la ci-dessous.</li>
     </ol>
@@ -1513,6 +1638,7 @@ function sheetIcu() {
     <button class="btn primary block" id="icu-connect">Connecter</button>`, el => {
     if (on) {
       $('#icu-auto', el).onchange = e => { ICU.auto = e.target.checked; icuSave(); if (ICU.auto) queueSync(); };
+      $('#icu-imp', el).onclick = async () => { await icuImport(true); sheetIcu(); };
       $('#icu-now', el).onclick = async () => { const b = $('#icu-now', el); b.disabled = true; b.textContent = 'Envoi…'; await autoSync(true); sheetIcu(); };
       twoStep($('#icu-off', el), 'Confirmer la déconnexion', async () => { for (const k of Object.keys(ICU)) delete ICU[k]; ICU.synced = {}; try { localStorage.removeItem(ICU_LS); } catch (e) {} closeSheet(); toast('Intervals.icu déconnecté'); schedule(); });
     } else {
@@ -1523,7 +1649,7 @@ function sheetIcu() {
         try {
           const me = await icuCall('/athlete/0', {}, key);
           Object.assign(ICU, { key, name: me?.name || me?.firstname || '', auto: true, err: null, synced: {} }); icuSave();
-          await autoSync(true); sheetIcu();
+          await autoSync(true); await icuImport(true); sheetIcu();
         } catch (e) { err.hidden = false; err.textContent = e.msg; b.disabled = false; b.textContent = 'Connecter'; }
       };
     }
@@ -1606,8 +1732,8 @@ function sheetSettings() {
 $('#settings').onclick = sheetSettings;
 
 render();
-Store.init().then(extendFree).then(() => { if (ICU.key && ICU.auto !== false) autoSync(); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') queueSync(); });
+Store.init().then(extendFree).then(() => { if (ICU.key) { if (ICU.auto !== false) autoSync(); icuImport(); } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { queueSync(); icuImport(); } });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
 </script>
