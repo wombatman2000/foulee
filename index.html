@@ -659,8 +659,8 @@ const Store = {
     schedule(); return true;
   },
   async run(local) { local(); return this.saveLocal(); },
-  saveProfile(p) { return this.run(() => { S.profile = p; }); },
-  savePlan(p) { return this.run(() => { S.plan = p; }); },
+  saveProfile(p) { const ok = this.run(() => { S.profile = p; }); Promise.resolve(ok).then(v => v && queueSync()); return ok; },
+  savePlan(p) { const ok = this.run(() => { S.plan = p; }); Promise.resolve(ok).then(v => v && queueSync()); return ok; },
   saveRun(r) { return this.run(() => { S.runs = S.runs.filter(x => x.id !== r.id).concat(r); }); },
   delRun(id) { return this.run(() => { S.runs = S.runs.filter(x => x.id !== id); }); },
   saveRoute(r) { return this.run(() => { S.routes = S.routes.filter(x => x.id !== r.id).concat(r); }); },
@@ -790,7 +790,7 @@ function viewPlan() {
     const exportable = list.filter(w => w.date >= TODAY && !isDone(w));
     return `<section class="week">
       <div class="week-h"><h3>${n > 0 ? `S${n} ` : ''}<span>· ${esc(fmtDay(mon, { day: 'numeric', month: 'short' }))} – ${esc(fmtDay(F.addDays(mon, 6), { day: 'numeric', month: 'short' }))}</span></h3>
-      <div class="week-tools"><span class="num">≈ ${F.fmtKm(km, 0)} km${S.plan?.targets?.[mon] ? ` <span class="muted">(cible ${Math.round(S.plan.targets[mon] * 0.9)}–${Math.round(S.plan.targets[mon] * 1.1)})</span>` : ''}</span>${exportable.length > 1 ? `<button class="btn ghost" data-export-week="${mon}">Export Garmin</button>` : ''}</div></div>
+      <div class="week-tools"><span class="num">≈ ${F.fmtKm(km, 0)} km${S.plan?.targets?.[mon] ? ` <span class="muted">(cible ${Math.round(S.plan.targets[mon] * 0.9)}–${Math.round(S.plan.targets[mon] * 1.1)})</span>` : ''}</span>${ICU.key && exportable.length ? (exportable.every(icuSynced) ? '<span class="pill ok">Envoyée</span>' : `<button class="btn ghost" data-sync>Envoyer</button>`) : exportable.length > 1 ? `<button class="btn ghost" data-export-week="${mon}">Fichiers Garmin</button>` : ''}</div></div>
       ${list.map(w => sessRow(w)).join('')}</section>`;
   };
   const past = [], future = [];
@@ -912,6 +912,7 @@ function bindView(v) {
   $$('[data-open]', v).forEach(b => b.onclick = () => sheetWorkout(b.dataset.open));
   $$('[data-run]', v).forEach(b => b.onclick = () => sheetRun(S.runs.find(r => r.id === b.dataset.run)));
   $$('[data-route]', v).forEach(b => b.onclick = () => sheetRoute(S.routes.find(r => r.id === b.dataset.route)));
+  $$('[data-sync]', v).forEach(b => b.onclick = () => autoSync(true));
   $$('[data-export-week]', v).forEach(b => b.onclick = () => {
     const mon = b.dataset.exportWeek, sun = F.addDays(mon, 6);
     exportGarmin(workouts().filter(w => w.date >= mon && w.date <= sun && w.date >= TODAY && !isDone(w)), `semaine-${mon}`);
@@ -1176,7 +1177,8 @@ function sheetWorkout(id) {
     <div class="row"><span class="pill z num" style="--zc:${zc(z)}">${esc(F.zoneLabel(z, ctx().goal))}</span><span class="pill num">${e.label}</span>${run ? '<span class="pill ok">Faite</span>' : ''}</div>
     ${w.notes ? `<p class="muted">${esc(w.notes)}</p>` : ''}
     ${stepsHtml(w)}
-    <div class="row">${run ? `<button class="btn" id="sw-run">Voir le résultat</button>` : `<button class="btn primary" id="sw-run">Saisir le résultat</button>`}<button class="btn" id="sw-fit">Exporter vers Garmin</button><button class="btn" id="sw-icu">Copier pour Intervals.icu</button></div>
+    <div class="row">${run ? `<button class="btn" id="sw-run">Voir le résultat</button>` : `<button class="btn primary" id="sw-run">Saisir le résultat</button>`}<button class="btn" id="sw-icu">${ICU.key ? (icuSynced(w) ? 'Renvoyer à Intervals.icu' : 'Envoyer à Intervals.icu') : 'Envoyer vers ma montre'}</button><button class="btn" id="sw-fit">Fichier Garmin (.fit)</button></div>
+    ${ICU.key && icuSynced(w) ? '<p class="small muted" style="margin-top:-6px">Envoyée à Intervals.icu : elle arrive sur la montre via Garmin Connect.</p>' : ''}
     <section class="col" style="gap:10px"><h3>Parcours adaptés</h3>
       ${quality ? `<p class="small muted">Pour ce fractionné, vise une piste d’athlétisme ou une ligne droite plate d’au moins ${w.steps.some(s => s.k === 'rep' && s.steps[0].by === 'dist' && s.steps[0].v >= 800) ? '800' : '400'} m.</p>` : ''}
       ${m.length ? m.map(x => `<div class="card route"><div class="spread"><b>${esc(x.r.name)}</b><span class="num small muted">${F.fmtKm(Number(x.r.km))} km · ${x.dev >= 0 ? '+' : ''}${Math.round(x.dev * 100)} %</span></div>
@@ -1188,7 +1190,7 @@ function sheetWorkout(id) {
   openSheet(TYPES[w.type]?.short || 'Séance', body, el => {
     $('#sw-run', el).onclick = () => sheetRun(run || null, w);
     $('#sw-fit', el).onclick = () => exportGarmin([w], w.date);
-    $('#sw-icu', el).onclick = () => sheetIntervals(w);
+    $('#sw-icu', el).onclick = async () => { if (!ICU.key) { sheetIcu(); return; } const b = $('#sw-icu', el); b.disabled = true; b.textContent = 'Envoi…'; const ok = await icuPush([w], true); if (ok) toast('Séance envoyée à Intervals.icu'); sheetWorkout(w.id); };
     $('#sw-edit', el).onclick = () => sheetEdit(w);
     twoStep($('#sw-del', el), 'Confirmer la suppression', async () => { if (await deleteWorkout(w.id)) { closeSheet(); toast('Séance supprimée'); } });
   });
@@ -1434,6 +1436,100 @@ function sheetIntervals(w) {
   });
 }
 
+
+/* ---------- Intervals.icu direct sync ---------- */
+// The API key stays on this phone only (never in backups). Planned sessions of the next 4 weeks are
+// upserted with external_id = "foulee-<id>"; Intervals.icu then forwards them to Garmin Connect.
+const ICU_LS = 'foulee-icu';
+const ICU = (() => { try { return JSON.parse(localStorage.getItem(ICU_LS) || '{}'); } catch (e) { return {}; } })();
+ICU.synced = ICU.synced || {};
+const icuSave = () => { try { localStorage.setItem(ICU_LS, JSON.stringify(ICU)); } catch (e) {} };
+const icuExt = w => 'foulee-' + w.id;
+function icuEvent(w) {
+  return { category: 'WORKOUT', type: 'Run', start_date_local: `${w.date}T00:00:00`, name: F.notation(w, ctx()).slice(0, 120), description: intervalsText(w), external_id: icuExt(w) };
+}
+const icuHash = ev => JSON.stringify(ev);
+const icuSynced = w => { const s = ICU.synced[icuExt(w)]; return !!s && s.h === icuHash(icuEvent(w)); };
+async function icuCall(path, opts = {}, key = ICU.key) {
+  let res;
+  try {
+    res = await fetch('https://intervals.icu/api/v1' + path, { ...opts, headers: { Authorization: 'Basic ' + btoa('API_KEY:' + key), 'Content-Type': 'application/json', ...(opts.headers || {}) } });
+  } catch (e) { throw { msg: 'Intervals.icu injoignable (pas de réseau, ou connexion bloquée par le navigateur).' }; }
+  if (res.status === 401 || res.status === 403) throw { msg: 'Intervals.icu refuse la clé API : vérifie-la dans les réglages.', auth: true };
+  if (!res.ok) throw { msg: `Intervals.icu a répondu par une erreur (${res.status}).` };
+  const t = await res.text();
+  return t ? JSON.parse(t) : null;
+}
+async function icuPush(list, loud) {
+  if (!ICU.key || !list.length) return true;
+  const evs = list.map(icuEvent);
+  try {
+    await icuCall('/athlete/0/events/bulk?upsert=true', { method: 'POST', body: JSON.stringify(evs) });
+    list.forEach((w, i) => { ICU.synced[icuExt(w)] = { h: icuHash(evs[i]), date: w.date }; });
+    ICU.last = new Date().toISOString(); ICU.err = null; icuSave(); schedule();
+    return true;
+  } catch (e) { ICU.err = e.msg; icuSave(); if (loud) toast(e.msg); return false; }
+}
+let syncT = 0, syncing = false;
+function queueSync() { if (!ICU.key || ICU.auto === false) return; clearTimeout(syncT); syncT = setTimeout(autoSync, 1500); }
+async function autoSync(loud) {
+  if (!ICU.key || syncing) return;
+  syncing = true;
+  try {
+    const horizon = F.addDays(TODAY, 27);
+    const upcoming = workouts().filter(w => w.date >= TODAY && w.date <= horizon && !isDone(w));
+    const changed = upcoming.filter(w => !icuSynced(w));
+    const live = new Set(upcoming.map(icuExt));
+    const gone = Object.entries(ICU.synced).filter(([ext, v]) => !live.has(ext) && v.date >= TODAY && !(S.plan?.workouts || []).some(w => icuExt(w) === ext && isDone(w))).map(([ext]) => ext);
+    if (gone.length) {
+      try { await icuCall('/athlete/0/events/bulk-delete', { method: 'PUT', body: JSON.stringify(gone.map(external_id => ({ external_id }))) }); gone.forEach(x => delete ICU.synced[x]); icuSave(); }
+      catch (e) { ICU.err = e.msg; icuSave(); if (loud) toast(e.msg); }
+    }
+    for (const [ext, v] of Object.entries(ICU.synced)) if (v.date < F.addDays(TODAY, -60)) delete ICU.synced[ext];
+    if (changed.length) await icuPush(changed, loud);
+    else { ICU.last = new Date().toISOString(); icuSave(); }
+    if (loud && !ICU.err) toast(changed.length ? `${changed.length} séance${changed.length > 1 ? 's' : ''} envoyée${changed.length > 1 ? 's' : ''}` : 'Tout est déjà à jour');
+  } finally { syncing = false; schedule(); }
+}
+function sheetIcu() {
+  const on = !!ICU.key;
+  openSheet('Envoi vers la montre', on ? `
+    <div class="status lv-${ICU.err ? 'warn' : 'ok'}"><p class="eyebrow">Intervals.icu</p><div class="big" style="font-size:24px">${ICU.err ? 'Problème d’envoi' : 'Connecté'}${ICU.name ? ' · ' + esc(ICU.name) : ''}</div>
+      <p class="small">${ICU.err ? esc(ICU.err) : ICU.last ? `Dernier envoi : ${esc(new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(ICU.last)))}` : 'Aucun envoi pour l’instant.'}</p></div>
+    <label class="check"><input type="checkbox" id="icu-auto" ${ICU.auto !== false ? 'checked' : ''}> Envoyer automatiquement les séances des 4 prochaines semaines</label>
+    <p class="small muted">À chaque ouverture de Foulée et à chaque changement du plan. Intervals.icu transmet ensuite à Garmin Connect les séances des 7 prochains jours, et l’appli Connect les met sur ta montre.</p>
+    <button class="btn primary block" id="icu-now">Envoyer maintenant</button>
+    <button class="btn danger block" id="icu-off">Déconnecter</button>` : `
+    <p>Une seule fois, relie Foulée à Intervals.icu (gratuit). Ensuite tes séances partent toutes seules vers ta Venu 2S.</p>
+    <ol class="ol">
+      <li>Crée un compte sur <a href="https://intervals.icu/" target="_blank" rel="noopener">intervals.icu</a>.</li>
+      <li>Dans ses <b>Settings</b>, section Garmin Connect : connecte ton compte Garmin et active l’envoi des séances planifiées (<b>Upload planned workouts</b>).</li>
+      <li>Toujours dans Settings, section <b>Developer Settings</b> : génère une <b>API key</b> et copie-la.</li>
+      <li>Colle-la ci-dessous.</li>
+    </ol>
+    <label class="field"><span>Clé API Intervals.icu</span><input id="icu-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Colle ta clé ici"></label>
+    <p class="small muted">La clé reste uniquement sur ce téléphone. Elle n’est pas incluse dans tes sauvegardes.</p>
+    <p class="err" id="icu-err" hidden></p>
+    <button class="btn primary block" id="icu-connect">Connecter</button>`, el => {
+    if (on) {
+      $('#icu-auto', el).onchange = e => { ICU.auto = e.target.checked; icuSave(); if (ICU.auto) queueSync(); };
+      $('#icu-now', el).onclick = async () => { const b = $('#icu-now', el); b.disabled = true; b.textContent = 'Envoi…'; await autoSync(true); sheetIcu(); };
+      twoStep($('#icu-off', el), 'Confirmer la déconnexion', async () => { for (const k of Object.keys(ICU)) delete ICU[k]; ICU.synced = {}; try { localStorage.removeItem(ICU_LS); } catch (e) {} closeSheet(); toast('Intervals.icu déconnecté'); schedule(); });
+    } else {
+      $('#icu-connect', el).onclick = async () => {
+        const key = $('#icu-key', el).value.trim(), err = $('#icu-err', el), b = $('#icu-connect', el);
+        if (!key) { err.hidden = false; err.textContent = 'Colle d’abord ta clé API.'; return; }
+        b.disabled = true; b.textContent = 'Vérification…';
+        try {
+          const me = await icuCall('/athlete/0', {}, key);
+          Object.assign(ICU, { key, name: me?.name || me?.firstname || '', auto: true, err: null, synced: {} }); icuSave();
+          await autoSync(true); sheetIcu();
+        } catch (e) { err.hidden = false; err.textContent = e.msg; b.disabled = false; b.textContent = 'Connecter'; }
+      };
+    }
+  });
+}
+
 /* ---------- Garmin export ---------- */
 async function saveFiles(files) {
   // files: [{name, data: Uint8Array|string, type}]
@@ -1483,7 +1579,9 @@ function sheetSettings() {
     <button class="btn primary block" id="bk-save">Sauvegarder mes données</button>
     <label class="btn block" style="cursor:pointer">Restaurer une sauvegarde<input id="bk-file" type="file" accept=".json,application/json" hidden></label>
     <div id="bk-confirm" hidden class="card col" style="gap:10px"><p id="bk-info"></p><button class="btn danger block" id="bk-go">Remplacer mes données par cette sauvegarde</button></div>
+    <button class="btn block" id="bk-icu">Envoi vers la montre (Intervals.icu)${ICU.key ? ' · connecté' : ''}</button>
     <p class="small muted">Foulée · version 1</p>`, el => {
+    $('#bk-icu', el).onclick = sheetIcu;
     $('#bk-save', el).onclick = async () => {
       const day = TODAY;
       const prev = S.lastBackup; S.lastBackup = day;
@@ -1508,7 +1606,8 @@ function sheetSettings() {
 $('#settings').onclick = sheetSettings;
 
 render();
-Store.init().then(extendFree);
+Store.init().then(extendFree).then(() => { if (ICU.key && ICU.auto !== false) autoSync(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') queueSync(); });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
 </script>
