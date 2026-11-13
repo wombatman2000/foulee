@@ -253,6 +253,14 @@ input[type=range]{accent-color:var(--accent);padding:0;min-height:30px}
 .scale input:checked + span{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .scale input:focus-visible + span{outline:2px solid var(--accent);outline-offset:2px}
 .src li{font-size:14px}
+.mv-head,.mv{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.mv-head span{text-align:center;font:600 12px var(--f-body);color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.mv button{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:10px;padding:6px 2px 7px;display:flex;flex-direction:column;align-items:center;gap:4px;min-height:54px;cursor:pointer}
+.mv button b{font:700 19px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.mv button i{display:block;width:62%;height:5px;border-radius:3px;background:var(--zc,transparent)}
+.mv button.cur{border-color:var(--accent);border-width:2px}
+.mv button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.mv button:disabled{opacity:.38;cursor:default}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:20;background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;font-size:15px;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
 
 @media (max-width:380px){ .metrics{grid-template-columns:repeat(2,1fr)} .kpi .v{font-size:24px} }
@@ -669,6 +677,17 @@ const Store = {
   delOther(id) { return this.run(() => { S.others = (S.others || []).filter(x => x.id !== id); }); },
   saveWell(e) { return this.run(() => { S.wellness = (S.wellness || []).filter(x => x.date !== e.date).concat(e); }); },
 };
+// A session counts as "from the plan" if it was generated, even if edited or moved since
+// (older versions flagged moved/lightened sessions as manual: recognise them by their note).
+const fromPlan = w => !!w.auto || /(Décalée|Allégée) après/.test(w.notes || '');
+// What survives a plan change: done or past sessions, today's session, and hand-added
+// sessions that no new session replaces on the same day.
+function survivors(newList) {
+  const newDates = new Set(newList.map(w => w.date));
+  const old = S.plan?.workouts || [];
+  const keep = old.filter(w => w.date <= TODAY || isDone(w) || (!fromPlan(w) && !newDates.has(w.date)));
+  return { keep, removed: old.filter(w => !keep.includes(w)), keptManual: keep.filter(w => w.date > TODAY && !isDone(w) && !fromPlan(w)) };
+}
 async function saveWorkout(w) {
   const list = (S.plan?.workouts || []).filter(x => x.id !== w.id).concat(w);
   return Store.savePlan({ ...(S.plan || {}), workouts: list });
@@ -721,8 +740,9 @@ function render() {
   } else cd.innerHTML = isFree() ? '<strong>Entretien</strong>' : '';
   const v = $('#view');
   if (!S.ready) { v.innerHTML = `<div class="col"><div class="empty"><p class="muted">Chargement de ton carnet…</p></div></div>`; return; }
+  const inSafari = navigator.standalone === false;
   const stale = S.runs.length >= 3 && (!S.lastBackup || F.daysBetween(S.lastBackup, TODAY) > 30);
-  const note = (S.note ? `<div class="note">${esc(S.note)}</div>` : '') + (stale ? `<button class="note info" style="border:0;text-align:left;cursor:pointer" data-act="backup">Pense à sauvegarder tes données : dernière sauvegarde ${S.lastBackup ? 'le ' + esc(fmtDay(S.lastBackup, { day: 'numeric', month: 'long' })) : 'jamais faite'}. Toucher pour sauvegarder.</button>` : '');
+  const note = (inSafari ? `<div class="note">Tu es dans Safari. Sur iPhone, Safari et l’icône de l’écran d’accueil gardent des données séparées : plan, sorties et clé Intervals.icu enregistrés ici n’apparaîtront pas dans l’icône. Ouvre plutôt Foulée depuis son icône.</div>` : '') + (S.note ? `<div class="note">${esc(S.note)}</div>` : '') + (stale ? `<button class="note info" style="border:0;text-align:left;cursor:pointer" data-act="backup">Pense à sauvegarder tes données : dernière sauvegarde ${S.lastBackup ? 'le ' + esc(fmtDay(S.lastBackup, { day: 'numeric', month: 'long' })) : 'jamais faite'}. Toucher pour sauvegarder.</button>` : '');
   v.innerHTML = `<div class="col">${note}${S.tab === 'plan' ? viewPlan() : S.tab === 'journal' ? viewJournal() : S.tab === 'forme' ? viewForme() : viewRoutes()}</div>`;
   bindView(v);
 }
@@ -1203,7 +1223,7 @@ function sheetSetup(preset) {
       <p class="small muted">Le dernier jour coché accueille la sortie longue, le premier la séance de qualité.</p></fieldset>
     <div class="preview" id="su-prev"></div>
     <p class="err" id="su-err" hidden></p>
-    ${S.plan?.workouts?.length ? `<p class="small muted">Les séances futures générées automatiquement seront remplacées. Tes séances ajoutées à la main et celles déjà faites sont conservées.</p>` : ''}
+    <p class="small muted" id="su-repl" hidden></p>
     <button class="btn primary block" type="submit" id="su-submit">Enregistrer</button>
   </form>`;
   openSheet(S.profile ? 'Mon programme' : 'Créer mon plan', body, el => {
@@ -1234,6 +1254,11 @@ function sheetSetup(preset) {
         <div class="small num">${easy} % du temps de course en endurance facile, ${q.days.length >= 4 ? '2 séances de qualité' : '1 séance de qualité'} par semaine.</div>
         <div class="small muted num">EF ${F.fmtPace(F.paceRange('ef', c)[0])}–${F.fmtPace(F.paceRange('ef', c)[1])} · Seuil ${F.fmtPace(F.paceRange('seuil', c)[0])}–${F.fmtPace(F.paceRange('seuil', c)[1])} · ${F.zoneLabel('as', c.goal)} ${F.fmtPace(F.paceMid('as', c))} · VMA ${F.fmtPace(F.paceRange('vma', c)[0])} /km</div>
         ${firstQ ? `<div class="small">Première séance de qualité : <b>${esc(F.notation(firstQ, c))}</b></div>` : ''}`;
+      const sv = survivors(r.workouts), repl = $('#su-repl', el);
+      repl.hidden = !(S.plan?.workouts || []).some(w => w.date > TODAY);
+      repl.textContent = `${sv.removed.length} séance${sv.removed.length > 1 ? 's' : ''} à venir de l’ancien programme ${sv.removed.length > 1 ? 'seront supprimées' : 'sera supprimée'}, ici et sur ta montre.`
+        + (sv.keptManual.length ? ` Conservée${sv.keptManual.length > 1 ? 's' : ''} car ajoutée${sv.keptManual.length > 1 ? 's' : ''} à la main sur un jour libre : ${sv.keptManual.map(w => fmtDay(w.date, { weekday: 'short', day: 'numeric' })).join(', ')}.` : '')
+        + ' Les séances faites et celle du jour ne bougent pas.';
     };
     el.querySelector('form').addEventListener('input', prev);
     el.querySelector('form').addEventListener('change', prev);
@@ -1249,7 +1274,7 @@ function sheetSetup(preset) {
       const q = read(); prev();
       const err = $('#su-err', el);
       if (!last || last.error || !(q.vma >= 8 && q.vma <= 25)) { err.hidden = false; err.textContent = last?.error || 'Vérifie la VMA (entre 8 et 25 km/h).'; return; }
-      const keep = (S.plan?.workouts || []).filter(w => !w.auto || w.date < TODAY || isDone(w));
+      const keep = survivors(last.workouts).keep;
       const free = q.mode === 'free';
       const profile = { ...q, updated: new Date().toISOString() };
       if (free) { profile.goal = S.profile?.goal || q.goal; profile.raceDate = null; }
@@ -1268,7 +1293,8 @@ async function extendFree() {
   if (from >= target) return;
   const r = F.genFree({ vol: '20-30', volMax: '30-40', ...S.profile }, TODAY, S.plan.firstMon, from, target - from, { longest30: longest30() });
   if (r.error) return;
-  await Store.savePlan({ ...S.plan, genWeeks: target, targets: { ...(S.plan.targets || {}), ...r.targets }, workouts: (S.plan.workouts || []).concat(r.workouts) });
+  const taken = new Set((S.plan.workouts || []).map(w => w.date));
+  await Store.savePlan({ ...S.plan, genWeeks: target, targets: { ...(S.plan.targets || {}), ...r.targets }, workouts: (S.plan.workouts || []).concat(r.workouts.filter(w => !taken.has(w.date))) });
 }
 function stepsHtml(w) {
   const c = ctx();
@@ -1280,6 +1306,64 @@ function stepsHtml(w) {
       <div class="pace num">${F.fmtPace(f)}–${F.fmtPace(sl)}<small>min/km</small></div></div>`;
   };
   return `<div class="steps">${w.steps.map(s => s.k === 'rep' ? `${s.n > 1 ? `<div class="rep-h">Répéter ${s.n} fois</div>` : ''}<div class="${s.n > 1 ? 'rep-in' : ''}">${s.steps.map(one).join('')}</div>` : one(s)).join('')}</div>`;
+}
+
+/* ---------- move a session ---------- */
+const HARD = ['frac', 'test', 'sl', 'course'];
+function sheetMove(w) {
+  const others = () => (S.plan?.workouts || []).filter(x => x.id !== w.id);
+  let start = F.mondayOf(TODAY);
+  if (w.date >= F.addDays(start, 14)) start = F.addDays(F.mondayOf(w.date), -7);
+  const days = Array.from({ length: 14 }, (_, i) => F.addDays(start, i));
+  const onDay = d => others().filter(x => x.date === d);
+  const chip = d => {
+    const o = onDay(d).find(x => !isDone(x)) || onDay(d)[0];
+    const z = o ? F.mainZone(o) : null;
+    return `<button type="button" data-d="${d}" class="${d === w.date ? 'cur' : ''}" ${d < TODAY || d === w.date ? 'disabled' : ''} aria-pressed="false"
+      aria-label="${esc(fmtDay(d, { weekday: 'long', day: 'numeric', month: 'long' }))}${o ? ' : ' + esc(TYPES[o.type]?.short || '') : ''}"><b>${F.parseD(d).getDate()}</b><i style="${z ? `--zc:${zc(z)}` : ''}"></i></button>`;
+  };
+  openSheet('Déplacer la séance', `
+    <p><b>${esc(F.notation(w, ctx()))}</b><br><span class="muted small">Actuellement : ${esc(fmtDay(w.date, { weekday: 'long', day: 'numeric', month: 'long' }))}</span></p>
+    <div class="col" style="gap:6px"><div class="mv-head">${['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(l => `<span>${l}</span>`).join('')}</div>
+      <div class="mv">${days.map(chip).join('')}</div>
+      <p class="small muted">Le trait coloré signale un jour qui a déjà une séance.</p></div>
+    <label class="field"><span>Ou une autre date</span><input id="mv-date" type="date" min="${TODAY}"></label>
+    <div class="preview" id="mv-prev" hidden></div>
+    <button class="btn primary block" id="mv-go" disabled>Choisis un jour</button>`, el => {
+    let target = null;
+    const plan = d => {
+      const clash = onDay(d).filter(x => !isDone(x));
+      const swap = clash.length === 1 && w.date >= TODAY ? clash[0] : null;
+      const after = (S.plan?.workouts || []).map(x => x.id === w.id ? { ...x, date: d } : swap && x.id === swap.id ? { ...x, date: w.date } : x);
+      const warns = [];
+      const near = (x, list) => list.filter(y => y.id !== x.id && HARD.includes(y.type) && !isDone(y) && Math.abs(F.daysBetween(x.date, y.date)) === 1);
+      for (const x of after.filter(x => x.id === w.id || (swap && x.id === swap.id))) {
+        if (!HARD.includes(x.type)) continue;
+        const n = near(x, after)[0];
+        if (n) warns.push(`${TYPES[x.type]?.short} et ${TYPES[n.type]?.short} se retrouvent deux jours de suite (${fmtDay(x.date < n.date ? x.date : n.date, { weekday: 'long' })} et ${fmtDay(x.date < n.date ? n.date : x.date, { weekday: 'long' })}). Mieux vaut un jour facile ou de repos entre deux séances exigeantes.`);
+      }
+      if (S.profile?.raceDate && !isFree() && d > S.profile.raceDate && w.type !== 'course') warns.push('Ce jour tombe après ta course objectif.');
+      return { d, clash, swap, warns: [...new Set(warns)] };
+    };
+    const pick = d => {
+      if (!d || d < TODAY || d === w.date) return;
+      target = plan(d);
+      $$('.mv button', el).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.d === d)));
+      const box = $('#mv-prev', el); box.hidden = false;
+      box.innerHTML = `<b>${esc(fmtDay(d, { weekday: 'long', day: 'numeric', month: 'long' }))}</b>`
+        + (target.swap ? `<p class="small">Ce jour-là il y a déjà « ${esc(F.notation(target.swap, ctx()))} » : elle prendra la place libérée, ${esc(fmtDay(w.date, { weekday: 'long', day: 'numeric' }))}.</p>`
+          : target.clash.length ? `<p class="small">Ce jour compte déjà ${target.clash.length} séances : la tienne s’ajoutera à côté.</p>` : '')
+        + target.warns.map(t => `<p class="note">${esc(t)}</p>`).join('');
+      const go = $('#mv-go', el); go.disabled = false; go.textContent = target.swap ? 'Échanger les deux séances' : 'Déplacer ici';
+    };
+    $$('.mv button', el).forEach(b => b.onclick = () => pick(b.dataset.d));
+    $('#mv-date', el).onchange = e => pick(e.target.value);
+    $('#mv-go', el).onclick = async () => {
+      if (!target) return;
+      const list = (S.plan?.workouts || []).map(x => x.id === w.id ? { ...x, date: target.d } : target.swap && x.id === target.swap.id ? { ...x, date: w.date } : x);
+      if (await Store.savePlan({ ...S.plan, workouts: list })) { toast(target.swap ? 'Séances échangées' : 'Séance déplacée'); sheetWorkout(w.id); }
+    };
+  });
 }
 function sheetWorkout(id) {
   const w = (S.plan?.workouts || []).find(x => x.id === id); if (!w) return;
@@ -1295,25 +1379,26 @@ function sheetWorkout(id) {
     ${stepsHtml(w)}
     <div class="row">${run ? `<button class="btn" id="sw-run">Voir le résultat</button>` : `<button class="btn primary" id="sw-run">Saisir le résultat</button>`}<button class="btn" id="sw-icu">${ICU.key ? (icuSynced(w) ? 'Renvoyer à Intervals.icu' : 'Envoyer à Intervals.icu') : 'Envoyer vers ma montre'}</button><button class="btn" id="sw-fit">Fichier Garmin (.fit)</button></div>
     ${ICU.key && icuSynced(w) ? '<p class="small muted" style="margin-top:-6px">Envoyée à Intervals.icu : elle arrive sur la montre via Garmin Connect.</p>' : ''}
+    <div class="row">${run ? '' : '<button class="btn" id="sw-mv">Déplacer</button>'}<button class="btn" id="sw-edit">Modifier</button><button class="btn danger" id="sw-del">Supprimer</button></div>
     <section class="col" style="gap:10px"><h3>Parcours adaptés</h3>
       ${quality ? `<p class="small muted">Pour ce fractionné, vise une piste d’athlétisme ou une ligne droite plate d’au moins ${w.steps.some(s => s.k === 'rep' && s.steps[0].by === 'dist' && s.steps[0].v >= 800) ? '800' : '400'} m.</p>` : ''}
       ${m.length ? m.map(x => `<div class="card route"><div class="spread"><b>${esc(x.r.name)}</b><span class="num small muted">${F.fmtKm(Number(x.r.km))} km · ${x.dev >= 0 ? '+' : ''}${Math.round(x.dev * 100)} %</span></div>
         <div class="row" style="gap:6px"><span class="pill">${esc(SURF[x.r.surface] || '')}</span><span class="pill ${x.flat ? 'ok' : ''}">${x.flat ? 'Plat' : `${x.r.dplus} m D+`}</span>${safeUrl(x.r.link) ? `<a class="btn ghost" href="${esc(safeUrl(x.r.link))}" target="_blank" rel="noopener">Ouvrir le tracé</a>` : ''}</div></div>`).join('')
         : `<p class="small muted">Aucun de tes parcours ne fait ${F.fmtKm(e.km)} km à 20 % près.</p>`}
       <details><summary class="small" style="cursor:pointer;color:var(--accent);font-weight:600">Trouver un parcours de ${F.fmtKm(e.km)} km</summary><div style="margin-top:10px">${finderLinks(e.km)}</div></details>
-    </section>
-    <div class="row"><button class="btn" id="sw-edit">Modifier</button><button class="btn danger" id="sw-del">Supprimer</button></div>`;
+    </section>`;
   openSheet(TYPES[w.type]?.short || 'Séance', body, el => {
     $('#sw-run', el).onclick = () => sheetRun(run || null, w);
     $('#sw-fit', el).onclick = () => exportGarmin([w], w.date);
     const ad = adaptFor(w);
     if (ad) {
       const mv = $('#sw-move', el);
-      if (mv) mv.onclick = async () => { if (await saveWorkout({ ...w, date: ad.moveTo, auto: false, notes: [w.notes, `Décalée après : ${sportLabel(ad.o.sport)}.`].filter(Boolean).join(' ') })) { toast('Séance décalée'); sheetWorkout(w.id); } };
-      $('#sw-easy', el).onclick = async () => { const min = Math.max(30, Math.min(50, Math.round(est(w).t / 60 / 5) * 5)); if (await saveWorkout({ ...w, type: 'ef', steps: F.cont(min), auto: false, notes: `Allégée après : ${sportLabel(ad.o.sport)}.` })) { toast('Séance allégée'); sheetWorkout(w.id); } };
+      if (mv) mv.onclick = async () => { if (await saveWorkout({ ...w, date: ad.moveTo, notes: [w.notes, `Décalée après : ${sportLabel(ad.o.sport)}.`].filter(Boolean).join(' ') })) { toast('Séance décalée'); sheetWorkout(w.id); } };
+      $('#sw-easy', el).onclick = async () => { const min = Math.max(30, Math.min(50, Math.round(est(w).t / 60 / 5) * 5)); if (await saveWorkout({ ...w, type: 'ef', steps: F.cont(min), notes: `Allégée après : ${sportLabel(ad.o.sport)}.` })) { toast('Séance allégée'); sheetWorkout(w.id); } };
     }
     $('#sw-icu', el).onclick = async () => { if (!ICU.key) { sheetIcu(); return; } const b = $('#sw-icu', el); b.disabled = true; b.textContent = 'Envoi…'; const ok = await icuPush([w], true); if (ok) toast('Séance envoyée à Intervals.icu'); sheetWorkout(w.id); };
     $('#sw-edit', el).onclick = () => sheetEdit(w);
+    const mvb = $('#sw-mv', el); if (mvb) mvb.onclick = () => sheetMove(w);
     twoStep($('#sw-del', el), 'Confirmer la suppression', async () => { if (await deleteWorkout(w.id)) { closeSheet(); toast('Séance supprimée'); } });
   });
 }
@@ -1394,7 +1479,7 @@ function sheetEdit(w) {
       e.preventDefault();
       const steps = build(); const err = $('#ed-err', el);
       if (!steps || !$('#ed-date', el).value) { err.hidden = false; err.textContent = 'Il manque la date ou les valeurs de la séance.'; return; }
-      const w2 = { ...base, date: $('#ed-date', el).value, type: $('#ed-type', el).value, steps, notes: $('#ed-notes', el).value.trim(), auto: false };
+      const w2 = { ...base, date: $('#ed-date', el).value, type: $('#ed-type', el).value, steps, notes: $('#ed-notes', el).value.trim(), auto: isNew ? false : !!base.auto };
       if (await saveWorkout(w2)) { toast(isNew ? 'Séance ajoutée' : 'Séance modifiée'); sheetWorkout(w2.id); }
     };
   });
@@ -1577,7 +1662,7 @@ async function icuCall(path, opts = {}, key = ICU.key) {
   try {
     res = await fetch('https://intervals.icu/api/v1' + path, { ...opts, headers: { Authorization: 'Basic ' + btoa('API_KEY:' + key), 'Content-Type': 'application/json', ...(opts.headers || {}) } });
   } catch (e) { throw { msg: 'Intervals.icu injoignable (pas de réseau, ou connexion bloquée par le navigateur).' }; }
-  if (res.status === 401 || res.status === 403) throw { msg: 'Intervals.icu refuse la clé API : vérifie-la dans les réglages.', auth: true };
+  if (res.status === 401 || res.status === 403) throw { msg: 'Intervals.icu refuse la clé API. Elle a sans doute été régénérée (le crayon à côté de la clé en crée une nouvelle et désactive l’ancienne) : colle la clé actuelle dans Réglages › Envoi vers la montre › Changer de clé.', auth: true };
   if (!res.ok) throw { msg: `Intervals.icu a répondu par une erreur (${res.status}).` };
   const t = await res.text();
   return t ? JSON.parse(t) : null;
@@ -1599,19 +1684,43 @@ async function autoSync(loud) {
   syncing = true;
   try {
     const horizon = F.addDays(TODAY, 27);
-    const upcoming = workouts().filter(w => w.date >= TODAY && w.date <= horizon && !isDone(w));
-    const changed = upcoming.filter(w => !icuSynced(w));
-    const live = new Set(upcoming.map(icuExt));
-    const gone = Object.entries(ICU.synced).filter(([ext, v]) => !live.has(ext) && v.date >= TODAY && !(S.plan?.workouts || []).some(w => icuExt(w) === ext && isDone(w))).map(([ext]) => ext);
-    if (gone.length) {
-      try { await icuCall('/athlete/0/events/bulk-delete', { method: 'PUT', body: JSON.stringify(gone.map(external_id => ({ external_id }))) }); gone.forEach(x => delete ICU.synced[x]); icuSave(); }
+    const future = workouts().filter(w => w.date >= TODAY && !isDone(w));
+    const upcoming = future.filter(w => w.date <= horizon);
+    const live = new Map(future.map(w => [icuExt(w), w]));
+    const doneExt = new Set((S.plan?.workouts || []).filter(isDone).map(icuExt));
+    const del = new Set();
+    // 1) what this phone remembers sending
+    for (const [ext, v] of Object.entries(ICU.synced)) {
+      if (v.date < TODAY || doneExt.has(ext)) continue;
+      const w = live.get(ext);
+      if (!w || w.date !== v.date) del.add(ext);
+    }
+    // 2) what Intervals.icu actually holds (covers a reinstall or another phone)
+    try {
+      const evs = await icuCall(`/athlete/0/events?oldest=${TODAY}&newest=${F.addDays(TODAY, 120)}`);
+      if (Array.isArray(evs)) for (const ev of evs) {
+        const ext = String(ev?.external_id || '');
+        if (!ext.startsWith('foulee-') || doneExt.has(ext)) continue;
+        const d = String(ev.start_date_local || '').slice(0, 10), w = live.get(ext);
+        if (!w || (d && d !== w.date)) del.add(ext);
+      }
+    } catch (e) { if (e.auth) throw e; }
+    if (del.size) {
+      try { await icuCall('/athlete/0/events/bulk-delete', { method: 'PUT', body: JSON.stringify([...del].map(external_id => ({ external_id }))) }); del.forEach(x => delete ICU.synced[x]); icuSave(); }
       catch (e) { ICU.err = e.msg; icuSave(); if (loud) toast(e.msg); }
     }
     for (const [ext, v] of Object.entries(ICU.synced)) if (v.date < F.addDays(TODAY, -60)) delete ICU.synced[ext];
+    const changed = upcoming.filter(w => !icuSynced(w));
     if (changed.length) await icuPush(changed, loud);
-    else { ICU.last = new Date().toISOString(); icuSave(); }
-    if (loud && !ICU.err) toast(changed.length ? `${changed.length} séance${changed.length > 1 ? 's' : ''} envoyée${changed.length > 1 ? 's' : ''}` : 'Tout est déjà à jour');
-  } finally { syncing = false; schedule(); }
+    else { ICU.last = new Date().toISOString(); ICU.err = null; icuSave(); }
+    if (loud && !ICU.err) {
+      const parts = [];
+      if (changed.length) parts.push(`${changed.length} séance${changed.length > 1 ? 's' : ''} envoyée${changed.length > 1 ? 's' : ''}`);
+      if (del.size) parts.push(`${del.size} ancienne${del.size > 1 ? 's' : ''} retirée${del.size > 1 ? 's' : ''}`);
+      toast(parts.length ? parts.join(', ') : 'Tout est déjà à jour');
+    }
+  } catch (e) { ICU.err = e.msg; icuSave(); if (loud) toast(e.msg); }
+  finally { syncing = false; schedule(); }
 }
 function sheetIcu() {
   const on = !!ICU.key;
@@ -1624,6 +1733,9 @@ function sheetIcu() {
     <div class="card col" style="gap:6px"><b>Récupération de tes activités</b><p class="small muted">Courses et autres sports enregistrés par ta montre sont importés à chaque ouverture : les courses remplissent ton Journal, les autres sports comptent dans ta fatigue. Il faut que Intervals.icu récupère tes activités Garmin (Settings › Garmin Connect › Download activities).</p>
       <p class="small">${ICU.impErr ? esc(ICU.impErr) : ICU.imp ? `Dernier import : ${esc(new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(ICU.imp)))}` : 'Pas encore d’import.'}</p>
       <button class="btn" id="icu-imp">Importer maintenant</button></div>
+    <details><summary class="small" style="cursor:pointer;color:var(--accent);font-weight:600">Changer de clé API</summary>
+      <div class="col" style="gap:8px;margin-top:10px"><label class="field"><span>Nouvelle clé</span><input id="icu-new" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Colle ta clé ici"></label>
+      <button class="btn block" id="icu-repl">Remplacer la clé</button></div></details>
     <button class="btn danger block" id="icu-off">Déconnecter</button>` : `
     <p>Une seule fois, relie Foulée à Intervals.icu (gratuit). Ensuite tes séances partent toutes seules vers ta Venu 2S.</p>
     <ol class="ol">
@@ -1639,6 +1751,12 @@ function sheetIcu() {
     if (on) {
       $('#icu-auto', el).onchange = e => { ICU.auto = e.target.checked; icuSave(); if (ICU.auto) queueSync(); };
       $('#icu-imp', el).onclick = async () => { await icuImport(true); sheetIcu(); };
+      $('#icu-repl', el).onclick = async () => {
+        const key = $('#icu-new', el).value.trim(), b = $('#icu-repl', el); if (!key) return;
+        b.disabled = true; b.textContent = 'Vérification…';
+        try { await icuCall('/athlete/0', {}, key); ICU.key = key; ICU.err = null; icuSave(); toast('Clé remplacée'); await autoSync(true); sheetIcu(); }
+        catch (e) { toast(e.msg); b.disabled = false; b.textContent = 'Remplacer la clé'; }
+      };
       $('#icu-now', el).onclick = async () => { const b = $('#icu-now', el); b.disabled = true; b.textContent = 'Envoi…'; await autoSync(true); sheetIcu(); };
       twoStep($('#icu-off', el), 'Confirmer la déconnexion', async () => { for (const k of Object.keys(ICU)) delete ICU[k]; ICU.synced = {}; try { localStorage.removeItem(ICU_LS); } catch (e) {} closeSheet(); toast('Intervals.icu déconnecté'); schedule(); });
     } else {
@@ -1702,6 +1820,7 @@ function sheetSettings() {
   openSheet('Sauvegarde', `
     <p>Tes données sont enregistrées uniquement sur ce téléphone. Sauvegarde-les de temps en temps dans Fichiers (iCloud Drive) : c'est ce qui te permet de les retrouver si tu changes de téléphone.</p>
     <div class="card col" style="gap:6px"><b class="num">${counts}</b><span class="small muted">Dernière sauvegarde : ${S.lastBackup ? esc(fmtDay(S.lastBackup, { day: 'numeric', month: 'long', year: 'numeric' })) : 'jamais'}</span></div>
+    ${ICU.key ? '<label class="check"><input type="checkbox" id="bk-key" checked> Inclure ma clé Intervals.icu, pour être reconnecté automatiquement après une restauration</label>' : ''}
     <button class="btn primary block" id="bk-save">Sauvegarder mes données</button>
     <label class="btn block" style="cursor:pointer">Restaurer une sauvegarde<input id="bk-file" type="file" accept=".json,application/json" hidden></label>
     <div id="bk-confirm" hidden class="card col" style="gap:10px"><p id="bk-info"></p><button class="btn danger block" id="bk-go">Remplacer mes données par cette sauvegarde</button></div>
@@ -1711,7 +1830,8 @@ function sheetSettings() {
     $('#bk-save', el).onclick = async () => {
       const day = TODAY;
       const prev = S.lastBackup; S.lastBackup = day;
-      const res = await saveFiles([{ name: `foulee-sauvegarde-${day}.json`, data: JSON.stringify(Store.dump(), null, 1), type: 'application/json' }]);
+      const dump = Store.dump(); const kb = $('#bk-key', el); if (ICU.key && kb && kb.checked) dump.icuKey = ICU.key;
+      const res = await saveFiles([{ name: `foulee-sauvegarde-${day}.json`, data: JSON.stringify(dump, null, 1), type: 'application/json' }]);
       if (res === 'cancelled') { S.lastBackup = prev; return; }
       Store.saveLocal(); toast('Sauvegarde créée'); sheetSettings();
     };
@@ -1723,7 +1843,7 @@ function sheetSettings() {
         if (!d || d.app !== 'foulee') { toast("Ce fichier n'est pas une sauvegarde Foulée."); return; }
         $('#bk-info', el).textContent = `Sauvegarde du ${d.savedAt ? fmtDay(F.iso(new Date(d.savedAt)), { day: 'numeric', month: 'long', year: 'numeric' }) : '?'} : ${(d.plan?.workouts || []).length} séances, ${(d.runs || []).length} sorties, ${(d.routes || []).length} parcours. Tes données actuelles seront remplacées.`;
         $('#bk-confirm', el).hidden = false;
-        $('#bk-go', el).onclick = () => { Store.apply(d); if (Store.saveLocal()) { closeSheet(); toast('Données restaurées'); } };
+        $('#bk-go', el).onclick = () => { Store.apply(d); if (Store.saveLocal()) { if (d.icuKey && !ICU.key) { Object.assign(ICU, { key: d.icuKey, auto: true, err: null, synced: ICU.synced || {} }); icuSave(); autoSync(); icuImport(); } closeSheet(); toast(d.icuKey ? 'Données restaurées, Intervals.icu reconnecté' : 'Données restaurées'); } };
       };
       fr.readAsText(file);
     };
