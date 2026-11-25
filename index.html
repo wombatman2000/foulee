@@ -265,6 +265,10 @@ input[type=range]{accent-color:var(--accent);padding:0;min-height:30px}
 
 @media (max-width:380px){ .metrics{grid-template-columns:repeat(2,1fr)} .kpi .v{font-size:24px} }
 @media (prefers-reduced-motion:no-preference){ .sess,.run,.btn{transition:border-color .15s,filter .15s} }
+.split { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 6px; }
+.split-bar { height: 6px; border-radius: 3px; background: var(--accent); overflow: hidden; }
+.split-bar i { display: block; height: 100%; background: var(--line); }
+.split-l { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; color: var(--muted, inherit); }
 </style>
 </head>
 <body>
@@ -825,6 +829,16 @@ function viewPlan() {
   const byWeek = new Map();
   ws.forEach(w => { const m = F.mondayOf(w.date); if (!byWeek.has(m)) byWeek.set(m, []); byWeek.get(m).push(w); });
   const firstMon = S.plan.firstMon || [...byWeek.keys()][0];
+  // easy vs fast (threshold, race pace, VMA) running in a week, by distance and time
+  const split = list => {
+    const c = ctx(), o = { ek: 0, et: 0, hk: 0, ht: 0 };
+    const walk = (st, m) => { if (st.k === 'rep') { st.steps.forEach(x => walk(x, m * st.n)); return; } const r = F.stepTD(st, c); if (['seuil', 'vma', 'as'].includes(st.z)) { o.hk += r.d * m / 1000; o.ht += r.t * m; } else { o.ek += r.d * m / 1000; o.et += r.t * m; } };
+    list.forEach(w => w.steps.forEach(st => walk(st, 1)));
+    o.pct = o.et + o.ht ? Math.round(100 * o.et / (o.et + o.ht)) : 100;
+    return o;
+  };
+  const splitHtml = sp => sp.et + sp.ht ? `<div class="split"><div class="split-bar"><i style="width:${sp.pct}%"></i></div>
+      <div class="split-l small num"><span><b>Facile</b> ${F.fmtKm(sp.ek, 0)} km · ${F.fmtDurRound(sp.et)} (${sp.pct} %)</span><span><b>Rapide</b> ${F.fmtKm(sp.hk, 1)} km · ${F.fmtDurRound(sp.ht)} (${100 - sp.pct} %)</span></div></div>` : '';
   const weekBlock = (mon, list) => {
     const n = Math.round(F.daysBetween(firstMon, mon) / 7) + 1;
     const km = list.reduce((a, w) => a + est(w).km, 0);
@@ -832,6 +846,7 @@ function viewPlan() {
     return `<section class="week">
       <div class="week-h"><h3>${n > 0 ? `S${n} ` : ''}<span>· ${esc(fmtDay(mon, { day: 'numeric', month: 'short' }))} – ${esc(fmtDay(F.addDays(mon, 6), { day: 'numeric', month: 'short' }))}</span></h3>
       <div class="week-tools"><span class="num">≈ ${F.fmtKm(km, 0)} km${S.plan?.targets?.[mon] ? ` <span class="muted">(cible ${Math.round(S.plan.targets[mon] * 0.9)}–${Math.round(S.plan.targets[mon] * 1.1)})</span>` : ''}</span>${ICU.key && exportable.length ? (exportable.every(icuSynced) ? '<span class="pill ok">Envoyée</span>' : `<button class="btn ghost" data-sync>Envoyer</button>`) : exportable.length > 1 ? `<button class="btn ghost" data-export-week="${mon}">Fichiers Garmin</button>` : ''}</div></div>
+      ${splitHtml(split(list))}
       ${list.map(w => sessRow(w)).join('')}</section>`;
   };
   const past = [], future = [];
