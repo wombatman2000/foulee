@@ -1,5 +1,5 @@
 // Foulée — service worker: works offline, picks up new versions when online.
-const VERSION = 'foulee-v6';
+const VERSION = 'foulee-v7';
 const FONTS = 'foulee-fonts';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
@@ -15,6 +15,7 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  if (url.origin === location.origin && url.pathname.includes('/montre/')) return; // page Sillage : toujours en direct
   if (url.origin === location.origin) {
     if (req.mode === 'navigate') {
       // network first so updates arrive, cached copy when offline
