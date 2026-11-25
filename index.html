@@ -409,7 +409,7 @@ const FOULEE = (() => {
       else if (s.r === 'sl') {
         const T = round5(Math.min(165, kmToMin(longKm)));
         if (longAS && T >= 60) {
-          const blk = longAS, n = 3, rec = 3, rest = Math.max(15, T - n * blk - (n - 1) * rec - 10);
+          const blk = longAS, n = longAS >= 15 ? 3 : 2, rec = 3, rest = Math.max(15, T - n * blk - (n - 1) * rec - 10);
           s.steps = [S_('run', 'time', rest * 60, 'ef'), { k: 'rep', n, steps: [S_('run', 'time', blk * 60, 'as'), S_('rec', 'time', rec * 60, 'ef')] }, S_('cd', 'time', 600, 'recup')];
         } else s.steps = cont(T);
         s.type = 'sl'; used += kmOf(s.steps);
@@ -422,8 +422,18 @@ const FOULEE = (() => {
     }
     return slots.filter(s => s.d >= start && s.steps).map(s => mk(s.d, s.type, s.steps, s.notes));
   }
-  const qVMA = (i, f) => { const q = VMA_POOL[i % VMA_POOL.length]; return { type: 'frac', steps: frac({ ...q, z: 'vma', n: scaleN(q.n, f) }) }; };
-  const qQ2 = (i, f, asOnly) => { const pool = asOnly ? Q2_POOL.filter(x => x.z === 'as') : Q2_POOL; const q = pool[i % pool.length]; return { type: 'frac', steps: frac({ ...q, n: scaleN(q.n, f) }) }; };
+  // Work volume is capped against the week's km (Daniels, Running Formula: intervals <= 8 % of weekly km and <= 10 km; threshold <= 10 %; marathon-pace work <= 12 %)
+  const CAP = { vma: 0.08, seuil: 0.10, as: 0.12 };
+  // under this weekly volume a single quality session (warm-up + cool-down already take ~30')
+  const LOW_K = 30;
+  function capN(q, z, n, K, c) {
+    if (n <= 1 || !K) return n;
+    const km = stepTD(S_('run', q.by, q.v, z), c).d / 1000;
+    const cap = Math.min(10, CAP[z] * K);
+    return Math.max(2, Math.min(n, Math.floor(cap / km)));
+  }
+  const qVMA = (i, f, K, c) => { const q = VMA_POOL[i % VMA_POOL.length]; return { type: 'frac', steps: frac({ ...q, z: 'vma', n: capN(q, 'vma', scaleN(q.n, f), K, c) }) }; };
+  const qQ2 = (i, f, asOnly, K, c) => { const pool = asOnly ? Q2_POOL.filter(x => x.z === 'as') : Q2_POOL; const q = pool[i % pool.length]; return { type: 'frac', steps: frac({ ...q, n: capN(q, q.z, scaleN(q.n, f), K, c) }) }; };
   const qTest = () => ({ type: 'test', steps: frac({ wu: 20, n: 1, by: 'time', v: 360, z: 'vma', rec: 0, cd: 10 }), notes: TEST_NOTE });
   const scaleN = (n, f) => n <= 1 ? 1 : Math.max(2, Math.round(n * Math.min(1, f)));
 
@@ -464,9 +474,10 @@ const FOULEE = (() => {
       const f = taper || deload ? 0.75 : Math.min(1, 0.8 + 0.2 * b / 6);
       const late = left <= Math.max(2, Math.floor(weeks / 3));
       const quals = [];
+      const oneQ = !roles.includes('q2') || K < LOW_K;
       roles.forEach(r => {
-        if (r === 'q') { const single = !roles.includes('q2'); quals.push(single && (late || i % 2 === 1) ? qQ2(qi++, f, late) : qVMA(vi++, f)); }
-        else if (r === 'q2') quals.push(qQ2(qi++, f, late));
+        if (r === 'q') quals.push(oneQ && (late || i % 2 === 1) ? qQ2(qi++, f, late, K, c) : qVMA(vi++, f, K, c));
+        else if (r === 'q2' && !oneQ) quals.push(qQ2(qi++, f, late, K, c));
       });
       targets[mon] = Math.round(K);
       out.push(...fillWeek({ mon, start, days, roles, K, longKm, quals, c, mk, longAS: longGoal && late && !taper ? (p.goal === 'marathon' ? 15 : 10) : 0 }));
@@ -497,8 +508,10 @@ const FOULEE = (() => {
       roles.forEach(r => {
         if (r !== 'q' && r !== 'q2') return;
         if (i % 8 === 7 && !tested) { tested = true; quals.push(qTest()); return; }
-        const useQ2 = r === 'q2' || (!roles.includes('q2') && i % 2 === 1);
-        quals.push(useQ2 ? qQ2(i, f) : qVMA(i, f));
+        const oneQ = !roles.includes('q2') || K < LOW_K;
+        if (r === 'q2' && oneQ) return;
+        const useQ2 = r === 'q2' || (oneQ && i % 2 === 1);
+        quals.push(useQ2 ? qQ2(i, f, false, K, c) : qVMA(i, f, K, c));
       });
       targets[mon] = Math.round(K);
       out.push(...fillWeek({ mon, start, days, roles, K, longKm, quals, c, mk }));
@@ -1171,6 +1184,7 @@ function viewForme() {
         <li><b>Autres sports</b> : la charge de séance (effort × durée) s’applique à tous les sports, d’où leur prise en compte dans la fatigue. Les indicateurs de distance restent propres à la course, car le risque de blessure lié aux kilomètres est spécifique à l’impact de la course. Une séance de renforcement peut laisser une fatigue de plusieurs jours qui gêne l’endurance. <a href="https://www.sciencedaily.com/releases/2017/07/170726103003.htm" target="_blank" rel="noopener">Doma et al., Sports Med 2017</a></li>
         <li><b>Pas de ratio aigu/chronique</b> : très répandu, mais critiqué pour des artefacts statistiques et un faible pouvoir prédictif, et sans lien clair avec les blessures chez les coureurs. <a href="https://opus.lib.uts.edu.au/handle/10453/145169" target="_blank" rel="noopener">Impellizzeri et al., Sports Med 2020</a></li>
         <li><b>Organisation des séances</b> : la grande majorité du temps en endurance facile et au plus deux séances intenses par semaine, comme chez la plupart des coureurs d’endurance performants. <a href="https://www.frontiersin.org/articles/10.3389/fphys.2015.00295/full" target="_blank" rel="noopener">Stöggl & Sperlich, 2015</a> · <a href="https://link.springer.com/content/pdf/10.1007/s40279-024-02034-z.pdf" target="_blank" rel="noopener">Oliveira et al., Sports Med 2024</a></li>
+        <li><b>Dose de qualité</b> : la partie rapide d’une séance est plafonnée par rapport au kilométrage de la semaine : 8 % en VMA (10 km au plus), 10 % au seuil, 12 % à allure course. Sous 30 km par semaine, une seule séance de qualité, car l’échauffement et le retour au calme pèsent déjà lourd. C’est un repère d’entraîneur, pas le résultat d’une étude. <i>Daniels, Daniels’ Running Formula</i></li>
       </ul></div></details>`;
 }
 function sheetWell() {
@@ -1251,7 +1265,7 @@ function sheetSetup(preset) {
       const easy = Math.round((1 - F.hardShare(r.workouts, c)) * 100);
       box.innerHTML = `<div class="spread"><b class="num">${free ? `Cycles de 4 semaines · ${q.days.length} séances/sem.` : `${r.weeks} semaines · ${r.workouts.length} séances`}</b></div>
         ${tv.length ? `<div class="small num">Volume : <b>${tv[0]} km</b> la 1re semaine → <b>${Math.max(...tv)} km</b> au plus haut${longs.length ? ` · sortie longue ${F.fmtKm(Math.min(...longs))} → ${F.fmtKm(Math.max(...longs))} km` : ''}</div>` : ''}
-        <div class="small num">${easy} % du temps de course en endurance facile, ${q.days.length >= 4 ? '2 séances de qualité' : '1 séance de qualité'} par semaine.</div>
+        <div class="small num">${easy} % du temps de course en endurance facile, ${q.days.length < 4 ? '1 séance de qualité' : Math.max(...tv) < 30 ? '1 séance de qualité (2 à partir de 30 km/sem.)' : Math.min(...tv) < 30 ? '1 puis 2 séances de qualité (dès 30 km/sem.)' : '2 séances de qualité'} par semaine. Partie rapide plafonnée : 8 % des km en VMA, 10 % au seuil.</div>
         <div class="small muted num">EF ${F.fmtPace(F.paceRange('ef', c)[0])}–${F.fmtPace(F.paceRange('ef', c)[1])} · Seuil ${F.fmtPace(F.paceRange('seuil', c)[0])}–${F.fmtPace(F.paceRange('seuil', c)[1])} · ${F.zoneLabel('as', c.goal)} ${F.fmtPace(F.paceMid('as', c))} · VMA ${F.fmtPace(F.paceRange('vma', c)[0])} /km</div>
         ${firstQ ? `<div class="small">Première séance de qualité : <b>${esc(F.notation(firstQ, c))}</b></div>` : ''}`;
       const sv = survivors(r.workouts), repl = $('#su-repl', el);
