@@ -364,6 +364,11 @@ const FOULEE = (() => {
     { n: 15, by: 'time', v: 30, rec: 30 }, { n: 8, by: 'dist', v: 500, rec: 90 },
     { n: 12, by: 'dist', v: 300, rec: 60 }, { n: 5, by: 'dist', v: 1000, rec: 150 },
   ];
+  // knee-friendly: no very short, explosive reps (30/30, 300 m) - longer reps, a bit less violent
+  const VMA_SOFT = [
+    { n: 6, by: 'dist', v: 800, rec: 120 }, { n: 5, by: 'time', v: 180, rec: 120 },
+    { n: 5, by: 'dist', v: 1000, rec: 150 }, { n: 7, by: 'dist', v: 600, rec: 105 },
+  ];
   const Q2_POOL = [
     { n: 3, by: 'time', v: 480, z: 'seuil', rec: 120 }, { n: 3, by: 'dist', v: 2000, z: 'as', rec: 120 },
     { n: 2, by: 'time', v: 720, z: 'seuil', rec: 180 }, { n: 4, by: 'dist', v: 1500, z: 'as', rec: 90 },
@@ -387,11 +392,12 @@ const FOULEE = (() => {
     const share = LONG_SHARE[(p.days || []).length] || 0.3;
     const longMax = LONG_MAX[p.mode === 'free' ? 'free' : p.goal] || 20;
     const startLong = opts.longest30 > 0 ? opts.longest30 : start * share;
-    return { start, ceil, share, longMax, startLong };
+    const g = p.knee ? 1.05 : GROWTH, lg = p.knee ? 1.07 : LONG_GROWTH;
+    return { start, ceil, share, longMax, startLong, g, lg };
   }
   // b = number of normal (progressing) weeks before this one
-  const weekVolume = (vs, b) => Math.min(vs.ceil, vs.start * Math.pow(GROWTH, b));
-  const weekLong = (vs, K, b) => Math.min(vs.longMax, vs.share * K, vs.startLong * Math.pow(LONG_GROWTH, b + 1));
+  const weekVolume = (vs, b) => Math.min(vs.ceil, vs.start * Math.pow(vs.g || GROWTH, b));
+  const weekLong = (vs, K, b) => Math.min(vs.longMax, vs.share * K, vs.startLong * Math.pow(vs.lg || LONG_GROWTH, b + 1));
 
   // Fill one week: quality sessions are fixed, the long run follows its cap, easy runs absorb the rest.
   function fillWeek({ mon, start, days, roles, K, longKm, quals, c, mk, longAS }) {
@@ -429,10 +435,10 @@ const FOULEE = (() => {
   function capN(q, z, n, K, c) {
     if (n <= 1 || !K) return n;
     const km = stepTD(S_('run', q.by, q.v, z), c).d / 1000;
-    const cap = Math.min(10, CAP[z] * K);
+    const cap = Math.max(z === 'vma' ? 3 : 4, Math.min(10, CAP[z] * K)); // floor = smallest useful dose
     return Math.max(2, Math.min(n, Math.floor(cap / km)));
   }
-  const qVMA = (i, f, K, c) => { const q = VMA_POOL[i % VMA_POOL.length]; return { type: 'frac', steps: frac({ ...q, z: 'vma', n: capN(q, 'vma', scaleN(q.n, f), K, c) }) }; };
+  const qVMA = (i, f, K, c, soft) => { const pool = soft ? VMA_SOFT : VMA_POOL; const q = pool[i % pool.length]; return { type: 'frac', steps: frac({ ...q, z: 'vma', n: capN(q, 'vma', scaleN(q.n, f), K, c) }) }; };
   const qQ2 = (i, f, asOnly, K, c) => { const pool = asOnly ? Q2_POOL.filter(x => x.z === 'as') : Q2_POOL; const q = pool[i % pool.length]; return { type: 'frac', steps: frac({ ...q, n: capN(q, q.z, scaleN(q.n, f), K, c) }) }; };
   const qTest = () => ({ type: 'test', steps: frac({ wu: 20, n: 1, by: 'time', v: 360, z: 'vma', rec: 0, cd: 10 }), notes: TEST_NOTE });
   const scaleN = (n, f) => n <= 1 ? 1 : Math.max(2, Math.round(n * Math.min(1, f)));
@@ -476,7 +482,7 @@ const FOULEE = (() => {
       const quals = [];
       const oneQ = !roles.includes('q2') || K < LOW_K;
       roles.forEach(r => {
-        if (r === 'q') quals.push(oneQ && (late || i % 2 === 1) ? qQ2(qi++, f, late, K, c) : qVMA(vi++, f, K, c));
+        if (r === 'q') quals.push(oneQ && (late || i % 2 === 1) ? qQ2(qi++, f, late, K, c) : qVMA(vi++, f, K, c, p.knee));
         else if (r === 'q2' && !oneQ) quals.push(qQ2(qi++, f, late, K, c));
       });
       targets[mon] = Math.round(K);
@@ -511,7 +517,7 @@ const FOULEE = (() => {
         const oneQ = !roles.includes('q2') || K < LOW_K;
         if (r === 'q2' && oneQ) return;
         const useQ2 = r === 'q2' || (oneQ && i % 2 === 1);
-        quals.push(useQ2 ? qQ2(i, f, false, K, c) : qVMA(i, f, K, c));
+        quals.push(useQ2 ? qQ2(i, f, false, K, c) : qVMA(i, f, K, c, p.knee));
       });
       targets[mon] = Math.round(K);
       out.push(...fillWeek({ mon, start, days, roles, K, longKm, quals, c, mk }));
@@ -900,7 +906,7 @@ function viewJournal() {
     const w = (S.plan?.workouts || []).find(x => x.id === r.wid);
     const pace = r.dist && r.dur ? F.fmtPace(r.dur / r.dist) : '–';
     return `<button class="run" data-run="${r.id}">
-      <div class="spread"><b>${esc(fmtDay(r.date, { weekday: 'long', day: 'numeric', month: 'long' }))}</b>${r.rpe ? `<span class="pill">Ressenti ${esc(r.rpe)}/10</span>` : r.src === 'icu' ? '<span class="pill warn">Effort à noter</span>' : ''}</div>
+      <div class="spread"><b>${esc(fmtDay(r.date, { weekday: 'long', day: 'numeric', month: 'long' }))}</b>${r.rpe ? `<span class="pill">Ressenti ${esc(r.rpe)}/10</span>` : r.src === 'icu' ? '<span class="pill warn">Effort à noter</span>' : ''}${S.profile?.knee && r.knee != null ? `<span class="pill ${r.knee >= KNEE_HI ? 'warn' : ''}">Genou ${r.knee}/10</span>` : ''}</div>
       ${w ? `<span class="muted small">Prévu : ${esc(F.notation(w, ctx()))}</span>` : `<span class="muted small">Sortie libre</span>`}
       <div class="metrics"><div><b>${r.dist ? F.fmtKm(Number(r.dist), 2) : '–'}</b><span>km</span></div><div><b>${r.dur ? hms(r.dur) : '–'}</b><span>durée</span></div><div><b>${pace}</b><span>/km</span></div><div><b>${r.hr || '–'}</b><span>FC moy</span></div></div>
       ${(() => { const j = judge(r); return j.length ? `<div class="row" style="gap:6px">${j.join('')}</div>` : ''; })()}
@@ -938,6 +944,7 @@ function matchRoutes(w) {
     const km = Number(r.km) || 0; const dev = (km - d) / d;
     const flat = (Number(r.dplus) || 0) / Math.max(km, 1) < 10;
     let score = Math.abs(dev);
+    if (S.profile?.knee && !flat) score += .15;
     if (quality) { if (!flat) score += .2; if (r.surface === 'piste') score -= .1; if (r.surface === 'chemin') score += .1; }
     if (w.type === 'sl' && r.surface === 'chemin') score -= .05;
     return { r, dev, flat, score };
@@ -995,6 +1002,25 @@ function adaptFor(w) {
   }
   const when = o.date === w.date ? 'aujourd’hui' : o.date === F.addDays(w.date, -1) ? 'la veille' : 'il y a deux jours';
   return { o, moveTo, text: `${sportLabel(o.sport)} ${when} : ${F.fmtDurRound(Number(o.dur) || 0)}${o.rpe ? `, effort ${o.rpe}/10` : ''}. ${sportKind(o.sport) === 'strength' ? 'La fatigue d’une séance de renforcement peut durer plusieurs jours et peser sur une séance intense.' : 'Tes jambes ont déjà travaillé dur : la qualité de cette séance risque d’en pâtir.'}` };
+}
+
+// Knee pain monitoring (inspired by Silbernagel's pain-monitoring model): pain up to ~3/10 is tolerated,
+// 3-4 -> suggest easing the next hard session, >= 5 -> the next hard session is eased automatically.
+const KNEE_MID = 3, KNEE_HI = 5;
+const lastKnee = () => (S.runs || []).filter(r => r.knee != null && r.date >= F.addDays(TODAY, -3) && r.date <= TODAY).sort((a, b) => b.date.localeCompare(a.date))[0] || null;
+function kneeAdapt(w) {
+  if (!S.profile?.knee || !['frac', 'test', 'sl'].includes(w.type) || isDone(w) || w.date < TODAY || w.date > F.addDays(TODAY, 3)) return null;
+  const r = lastKnee(); if (!r || r.knee < KNEE_MID || r.date >= w.date) return null;
+  return { r, text: `Douleur au genou de ${r.knee}/10 lors de ta sortie ${r.date === TODAY ? 'd’aujourd’hui' : 'du ' + fmtDay(r.date, { weekday: 'long' })}. Tant que le genou réagit, garde des footings faciles et plats : la vitesse et les descentes chargent le plus le tendon.` };
+}
+async function kneeLighten(run) {
+  if (!S.profile?.knee || !(run.knee >= KNEE_HI)) return '';
+  const next = workouts().filter(w => w.date > run.date && w.date <= F.addDays(run.date, 4) && ['frac', 'test', 'sl'].includes(w.type) && !isDone(w)).sort((a, b) => a.date.localeCompare(b.date))[0];
+  const tail = run.knee >= 7 ? ' Douleur forte : repos conseillé, et avis d’un kiné si elle dure.' : '';
+  if (!next) return `Sortie enregistrée. Genou ${run.knee}/10 : reste sur du facile.${tail}`;
+  const min = Math.max(25, Math.min(40, Math.round(est(next).t / 60 / 2 / 5) * 5));
+  const ok = await saveWorkout({ ...next, type: 'ef', steps: F.cont(min), notes: `Allégée : douleur au genou ${run.knee}/10 le ${fmtDay(run.date, { day: 'numeric', month: 'short' })}.` });
+  return ok ? `Genou ${run.knee}/10 : séance de ${fmtDay(next.date, { weekday: 'long' })} remplacée par ${min}' faciles.${tail}` : 'Sortie enregistrée';
 }
 
 /* ---------- import from Intervals.icu (activities synced from Garmin) ---------- */
@@ -1135,6 +1161,13 @@ function signals(A) {
     const runL = A.week - A.other7.load, share = A.week ? A.other7.load / A.week : 0;
     out.push({ lv: 'ok', name: 'Autres sports (7 jours)', val: F.fmtDurRound(A.other7.dur), text: `${A.other7.n} activité${A.other7.n > 1 ? 's' : ''}, soit ${Math.round(share * 100)} % de ta charge de la semaine. Elles comptent dans ta fatigue, pas dans tes kilomètres de course.${A.other7.unrated ? ` ${A.other7.unrated} sans effort noté : un effort par défaut est utilisé, ajuste-le dans le Journal.` : ''}` });
   }
+  if (S.profile?.knee) {
+    const kr = (S.runs || []).filter(r => r.knee != null && r.date >= F.addDays(TODAY, -13)).sort((a, b) => a.date.localeCompare(b.date));
+    if (kr.length) {
+      const lastK = kr[kr.length - 1].knee, maxK = Math.max(...kr.map(r => r.knee));
+      out.push({ lv: lastK >= KNEE_HI ? 'alert' : lastK >= KNEE_MID ? 'warn' : 'ok', name: 'Douleur au genou', val: `${lastK}/10`, text: `Dernière note ${lastK}/10, maximum ${maxK}/10 sur 14 jours (${kr.length} sortie${kr.length > 1 ? 's' : ''} notée${kr.length > 1 ? 's' : ''}). Jusqu’à 3/10, une gêne qui disparaît le lendemain matin est généralement tolérée ; au-delà, allège, et si la douleur s’installe d’une semaine à l’autre, vois un kiné.` });
+    } else out.push({ lv: 'none', name: 'Douleur au genou', val: '–', text: 'Note ta douleur au genou en saisissant chaque sortie (0 si rien).' });
+  }
   const nextQ = workouts().find(w => w.date >= TODAY && w.date <= F.addDays(TODAY, 1) && adaptFor(w));
   if (nextQ) { const ad = adaptFor(nextQ); out.unshift({ lv: 'warn', name: `Séance ${nextQ.date === TODAY ? 'du jour' : 'de demain'} à adapter`, val: '', text: ad.text + ' Ouvre-la dans le Plan pour la décaler ou l’alléger en un tap.' }); }
   if (A.today) {
@@ -1185,6 +1218,7 @@ function viewForme() {
         <li><b>Pas de ratio aigu/chronique</b> : très répandu, mais critiqué pour des artefacts statistiques et un faible pouvoir prédictif, et sans lien clair avec les blessures chez les coureurs. <a href="https://opus.lib.uts.edu.au/handle/10453/145169" target="_blank" rel="noopener">Impellizzeri et al., Sports Med 2020</a></li>
         <li><b>Organisation des séances</b> : la grande majorité du temps en endurance facile et au plus deux séances intenses par semaine, comme chez la plupart des coureurs d’endurance performants. <a href="https://www.frontiersin.org/articles/10.3389/fphys.2015.00295/full" target="_blank" rel="noopener">Stöggl & Sperlich, 2015</a> · <a href="https://link.springer.com/content/pdf/10.1007/s40279-024-02034-z.pdf" target="_blank" rel="noopener">Oliveira et al., Sports Med 2024</a></li>
         <li><b>Dose de qualité</b> : la partie rapide d’une séance est plafonnée par rapport au kilométrage de la semaine : 8 % en VMA (10 km au plus), 10 % au seuil, 12 % à allure course. Sous 30 km par semaine, une seule séance de qualité, car l’échauffement et le retour au calme pèsent déjà lourd. C’est un repère d’entraîneur, pas le résultat d’une étude. <i>Daniels, Daniels’ Running Formula</i></li>
+        <li><b>Genou fragile</b> : la contrainte sur le genou monte avec la vitesse et en descente, baisse en montée et avec une cadence un peu plus élevée. Continuer à courir en surveillant la douleur n’a pas fait moins bien que le repos dans un essai sur les tendinopathies. <a href="https://salford-repository.worktribe.com/output/1341565/the-effect-of-speed-on-achilles-tendon-forces-and-patellofemoral-joint-stresses-in-high-performing-endurance-runners" target="_blank" rel="noopener">Starbuck et al.</a> · <a href="https://cris.maastrichtuniversity.nl/en/publications/per-step-and-cumulative-load-at-three-common-running-injury-locat/" target="_blank" rel="noopener">Maastricht</a> · <a href="https://uwnmbl.engr.wisc.edu/steprate.php" target="_blank" rel="noopener">Heiderscheit et al., MSSE 2011</a> · <a href="https://search.pedro.org.au/search-results/record-detail/18389" target="_blank" rel="noopener">Silbernagel et al., AJSM 2007</a></li>
       </ul></div></details>`;
 }
 function sheetWell() {
@@ -1209,7 +1243,7 @@ const DAYLBL = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
 const DAYNAME = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 function sheetSetup(preset) {
   const cur = S.profile || {};
-  const p = { goal: cur.goal || '10k', raceDate: cur.raceDate && cur.raceDate > TODAY ? cur.raceDate : defaultRace(), vma: cur.vma || 14, days: cur.days || [1, 3, 6], vol: cur.vol || '20-30', volMax: cur.volMax || '30-40' };
+  const p = { goal: cur.goal || '10k', raceDate: cur.raceDate && cur.raceDate > TODAY ? cur.raceDate : defaultRace(), vma: cur.vma || 14, days: cur.days || [1, 3, 6], vol: cur.vol || '20-30', volMax: cur.volMax || '30-40', knee: !!cur.knee };
   const mode = preset || cur.mode || 'race';
   const body = `<form id="setup">
     <div class="days" style="grid-template-columns:1fr 1fr" role="radiogroup" aria-label="Mode">
@@ -1232,9 +1266,10 @@ function sheetSetup(preset) {
         <label class="field"><span>Volume actuel</span><select id="su-vol">${F.BRACKETS.map(b => `<option value="${b.id}" ${b.id === p.vol ? 'selected' : ''}>${b.label}</option>`).join('')}</select></label>
         <label class="field"><span>Maximum à ne pas dépasser</span><select id="su-volmax">${F.BRACKETS.map(b => `<option value="${b.id}" ${b.id === p.volMax ? 'selected' : ''}>${b.label}</option>`).join('')}</select></label>
       </div>
-      <p class="small muted">Le plan part de ton volume actuel, monte d’au plus 8 % par semaine jusqu’au maximum, et prévoit une semaine plus légère toutes les 4 semaines. La sortie longue n’augmente jamais de plus de 10 % par rapport aux semaines précédentes.</p></fieldset>
+      <p class="small muted">Le plan part de ton volume actuel, monte d’au plus 8 % par semaine (5 % en mode genou fragile) jusqu’au maximum, et prévoit une semaine plus légère toutes les 4 semaines. La sortie longue n’augmente jamais de plus de 10 % par rapport aux semaines précédentes.</p></fieldset>
     <fieldset><legend>Jours d’entraînement</legend><div class="days">${DAYLBL.map((l, i) => `<label title="${DAYNAME[i]}"><input type="checkbox" value="${i}" ${(p.days || []).map(Number).includes(i) ? 'checked' : ''} aria-label="${DAYNAME[i]}"><span>${l}</span></label>`).join('')}</div>
       <p class="small muted">Le dernier jour coché accueille la sortie longue, le premier la séance de qualité.</p></fieldset>
+    <label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" id="su-knee" ${p.knee ? 'checked' : ''} style="margin-top:4px;width:auto"><span><b>Genou fragile</b><br><span class="small muted">Tendinites au genou : volume qui monte d’au plus 5 % par semaine, fractions longues plutôt que courtes et explosives, parcours plats privilégiés, et note de douleur après chaque sortie qui allège la séance suivante si besoin.</span></span></label>
     <div class="preview" id="su-prev"></div>
     <p class="err" id="su-err" hidden></p>
     <p class="small muted" id="su-repl" hidden></p>
@@ -1242,7 +1277,7 @@ function sheetSetup(preset) {
   </form>`;
   openSheet(S.profile ? 'Mon programme' : 'Créer mon plan', body, el => {
     const getMode = () => $('input[name=su-mode]:checked', el).value;
-    const read = () => ({ mode: getMode(), goal: $('#su-goal', el).value, raceDate: $('#su-date', el).value, vma: num($('#su-vma', el).value), days: $$('.days input[type=checkbox]:checked', el).map(i => Number(i.value)), vol: $('#su-vol', el).value, volMax: $('#su-volmax', el).value });
+    const read = () => ({ mode: getMode(), goal: $('#su-goal', el).value, raceDate: $('#su-date', el).value, vma: num($('#su-vma', el).value), days: $$('.days input[type=checkbox]:checked', el).map(i => Number(i.value)), vol: $('#su-vol', el).value, volMax: $('#su-volmax', el).value, knee: $('#su-knee', el).checked });
     let last = null;
     const prev = () => {
       const q = read(), free = q.mode === 'free';
@@ -1265,7 +1300,7 @@ function sheetSetup(preset) {
       const easy = Math.round((1 - F.hardShare(r.workouts, c)) * 100);
       box.innerHTML = `<div class="spread"><b class="num">${free ? `Cycles de 4 semaines · ${q.days.length} séances/sem.` : `${r.weeks} semaines · ${r.workouts.length} séances`}</b></div>
         ${tv.length ? `<div class="small num">Volume : <b>${tv[0]} km</b> la 1re semaine → <b>${Math.max(...tv)} km</b> au plus haut${longs.length ? ` · sortie longue ${F.fmtKm(Math.min(...longs))} → ${F.fmtKm(Math.max(...longs))} km` : ''}</div>` : ''}
-        <div class="small num">${easy} % du temps de course en endurance facile, ${q.days.length < 4 ? '1 séance de qualité' : Math.max(...tv) < 30 ? '1 séance de qualité (2 à partir de 30 km/sem.)' : Math.min(...tv) < 30 ? '1 puis 2 séances de qualité (dès 30 km/sem.)' : '2 séances de qualité'} par semaine. Partie rapide plafonnée : 8 % des km en VMA, 10 % au seuil.</div>
+        <div class="small num">${easy} % du temps de course en endurance facile, ${q.days.length < 4 ? '1 séance de qualité' : Math.max(...tv) < 30 ? '1 séance de qualité (2 à partir de 30 km/sem.)' : Math.min(...tv) < 30 ? '1 puis 2 séances de qualité (dès 30 km/sem.)' : '2 séances de qualité'} par semaine. Partie rapide plafonnée : 8 % des km en VMA, 10 % au seuil.${q.knee ? ' Mode genou fragile : progression plus lente, fractions longues.' : ''}</div>
         <div class="small muted num">EF ${F.fmtPace(F.paceRange('ef', c)[0])}–${F.fmtPace(F.paceRange('ef', c)[1])} · Seuil ${F.fmtPace(F.paceRange('seuil', c)[0])}–${F.fmtPace(F.paceRange('seuil', c)[1])} · ${F.zoneLabel('as', c.goal)} ${F.fmtPace(F.paceMid('as', c))} · VMA ${F.fmtPace(F.paceRange('vma', c)[0])} /km</div>
         ${firstQ ? `<div class="small">Première séance de qualité : <b>${esc(F.notation(firstQ, c))}</b></div>` : ''}`;
       const sv = survivors(r.workouts), repl = $('#su-repl', el);
@@ -1389,6 +1424,7 @@ function sheetWorkout(id) {
     <div class="row"><span class="pill z num" style="--zc:${zc(z)}">${esc(F.zoneLabel(z, ctx().goal))}</span><span class="pill num">${e.label}</span>${run ? '<span class="pill ok">Faite</span>' : ''}</div>
     ${(() => { const ad = adaptFor(w); return ad ? `<section class="status lv-warn"><p class="eyebrow">Adaptation conseillée</p><p>${esc(ad.text)}</p>
       <div class="row">${ad.moveTo ? `<button class="btn primary" id="sw-move">Décaler à ${esc(fmtDay(ad.moveTo, { weekday: 'long' }))}</button>` : ''}<button class="btn" id="sw-easy">Remplacer par un footing facile</button></div></section>` : ''; })()}
+    ${(() => { const ka = !adaptFor(w) && kneeAdapt(w); return ka ? `<section class="status lv-warn"><p class="eyebrow">Genou</p><p>${esc(ka.text)}</p><div class="row"><button class="btn primary" id="sw-knee">Remplacer par un footing facile</button></div></section>` : ''; })()}
     ${w.notes ? `<p class="muted">${esc(w.notes)}</p>` : ''}
     ${stepsHtml(w)}
     <div class="row">${run ? `<button class="btn" id="sw-run">Voir le résultat</button>` : `<button class="btn primary" id="sw-run">Saisir le résultat</button>`}<button class="btn" id="sw-icu">${ICU.key ? (icuSynced(w) ? 'Renvoyer à Intervals.icu' : 'Envoyer à Intervals.icu') : 'Envoyer vers ma montre'}</button><button class="btn" id="sw-fit">Fichier Garmin (.fit)</button></div>
@@ -1410,6 +1446,8 @@ function sheetWorkout(id) {
       if (mv) mv.onclick = async () => { if (await saveWorkout({ ...w, date: ad.moveTo, notes: [w.notes, `Décalée après : ${sportLabel(ad.o.sport)}.`].filter(Boolean).join(' ') })) { toast('Séance décalée'); sheetWorkout(w.id); } };
       $('#sw-easy', el).onclick = async () => { const min = Math.max(30, Math.min(50, Math.round(est(w).t / 60 / 5) * 5)); if (await saveWorkout({ ...w, type: 'ef', steps: F.cont(min), notes: `Allégée après : ${sportLabel(ad.o.sport)}.` })) { toast('Séance allégée'); sheetWorkout(w.id); } };
     }
+    const kb = $('#sw-knee', el);
+    if (kb) kb.onclick = async () => { const ka = kneeAdapt(w); const min = Math.max(25, Math.min(40, Math.round(est(w).t / 60 / 2 / 5) * 5)); if (await saveWorkout({ ...w, type: 'ef', steps: F.cont(min), notes: `Allégée : douleur au genou ${ka?.r.knee ?? ''}/10.` })) { toast('Séance allégée'); sheetWorkout(w.id); } };
     $('#sw-icu', el).onclick = async () => { if (!ICU.key) { sheetIcu(); return; } const b = $('#sw-icu', el); b.disabled = true; b.textContent = 'Envoi…'; const ok = await icuPush([w], true); if (ok) toast('Séance envoyée à Intervals.icu'); sheetWorkout(w.id); };
     $('#sw-edit', el).onclick = () => sheetEdit(w);
     const mvb = $('#sw-mv', el); if (mvb) mvb.onclick = () => sheetMove(w);
@@ -1543,6 +1581,7 @@ function sheetRun(run, forW) {
     <label class="field"><span>FC moy.</span><input id="rf-hr" type="number" inputmode="numeric" min="60" max="230" value="${r.hr ?? ''}"></label>
     <label class="field"><span>D+ (m)</span><input id="rf-dp" type="number" inputmode="numeric" min="0" value="${r.dplus ?? ''}"></label></div>
     <label class="field"><span>Effort ressenti de la séance : <b id="rf-rpev">${r.rpe || 5}</b>/10 (1 très facile, 10 maximal). À noter environ 30 min après.</span><input id="rf-rpe" type="range" min="1" max="10" value="${r.rpe || 5}"></label>
+    ${S.profile?.knee ? `<label class="field"><span>Douleur au genou : <b id="rf-kv">${r.knee ?? 0}</b>/10 (0 aucune). Note la plus forte pendant ou après la sortie.</span><input id="rf-knee" type="range" min="0" max="10" value="${r.knee ?? 0}"></label>` : ''}
     <label class="field"><span>Notes</span><textarea id="rf-notes" placeholder="Météo, sensations, douleurs…">${esc(r.notes || '')}</textarea></label>
     <p class="small muted num" id="rf-pace"></p>
     <p class="err" id="rf-err" hidden></p>
@@ -1550,7 +1589,7 @@ function sheetRun(run, forW) {
     ${isNew ? '' : '<button class="btn danger block" type="button" id="rf-del">Supprimer la sortie</button>'}
   </form>`;
   openSheet(isNew ? 'Nouvelle sortie' : 'Sortie', body, el => {
-    const pace = () => { const d = num($('#rf-dist', el).value), t = parseDur($('#rf-dur', el).value); $('#rf-pace', el).textContent = d > 0 && t ? `Allure moyenne ${F.fmtPace(t / d)} /km · ${F.fmtKm(d / (t / 3600))} km/h` : ''; $('#rf-rpev', el).textContent = $('#rf-rpe', el).value; };
+    const pace = () => { const d = num($('#rf-dist', el).value), t = parseDur($('#rf-dur', el).value); $('#rf-pace', el).textContent = d > 0 && t ? `Allure moyenne ${F.fmtPace(t / d)} /km · ${F.fmtKm(d / (t / 3600))} km/h` : ''; $('#rf-rpev', el).textContent = $('#rf-rpe', el).value; const kv = $('#rf-kv', el); if (kv) kv.textContent = $('#rf-knee', el).value; };
     $('#rf', el).addEventListener('input', pace); pace();
     $('#rf-date', el).addEventListener('change', () => { const cur = $('#rf-w', el).value; $('#rf-w', el).innerHTML = wOpts($('#rf-date', el).value); const same = near($('#rf-date', el).value).find(w => w.date === $('#rf-date', el).value); $('#rf-w', el).value = same && !cur ? same.id : cur; });
     $('#rf-file', el).onchange = e => {
@@ -1574,7 +1613,8 @@ function sheetRun(run, forW) {
       if (!(d > 0) || !t) { err.hidden = false; err.textContent = 'Indique au moins la distance et la durée (ex. 52:30).'; return; }
       const r2 = { ...r, date: $('#rf-date', el).value, wid: $('#rf-w', el).value || null, dist: Math.round(d * 100) / 100, dur: t,
         hr: num($('#rf-hr', el).value) || null, dplus: num($('#rf-dp', el).value) || 0, rpe: Number($('#rf-rpe', el).value), notes: $('#rf-notes', el).value.trim() };
-      if (await Store.saveRun(r2)) { closeSheet(); S.tab = 'journal'; toast('Sortie enregistrée'); schedule(); }
+      if ($('#rf-knee', el)) r2.knee = Number($('#rf-knee', el).value);
+      if (await Store.saveRun(r2)) { closeSheet(); S.tab = 'journal'; const lt = await kneeLighten(r2); toast(lt || 'Sortie enregistrée'); schedule(); }
     };
     const del = $('#rf-del', el);
     if (del) twoStep(del, 'Confirmer la suppression', async () => { if (await Store.delRun(r.id)) { closeSheet(); toast('Sortie supprimée'); } });
